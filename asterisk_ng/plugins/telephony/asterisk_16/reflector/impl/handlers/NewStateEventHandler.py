@@ -16,6 +16,14 @@ __all__ = [
     "NewStateEventHandler",
 ]
 
+def extract_endpoint(channel_name: str) -> str:
+    """
+    PJSIP/vipma_kkubeev-00000008 -> vipma_kkubeev
+    """
+    try:
+        return channel_name.split("/")[1].split("-")[0]
+    except Exception:
+        return channel_name
 
 class NewStateEventHandler(IAmiEventHandler):
 
@@ -53,10 +61,21 @@ class NewStateEventHandler(IAmiEventHandler):
         if channel.unique_id == root_channel.unique_id:
             return
 
+
+        # Определяем agent и trunk канал
+        def split_channels(ch1, ch2):
+            if "sbc" in ch1.name:
+                return ch2, ch1
+            if "sbc" in ch2.name:
+                return ch1, ch2
+            return ch1, ch2
+
+        agent_channel, trunk_channel = split_channels(channel, root_channel)
         if new_state == "Ringing":
             await self.__reflector.update_channel_state(channel_name, new_state)
+            agent_endpoint = extract_endpoint(agent_channel.name)
             ringing_telephony_event = RingingTelephonyEvent(
-                caller_phone_number=root_channel.phone,
+                caller_phone_number=agent_endpoint,
                 called_phone_number=channel.phone,
                 created_at=datetime.now(),
             )
@@ -66,10 +85,11 @@ class NewStateEventHandler(IAmiEventHandler):
 
         if new_state == "Up":
             await self.__reflector.update_channel_state(channel_name, new_state)
+            agent_endpoint = extract_endpoint(agent_channel.name)
             call_created_telephony_event = CallCreatedTelephonyEvent(
                 unique_id=linked_id,
-                caller_phone_number=root_channel.phone,
-                called_phone_number=channel.phone,
+                caller_phone_number=agent_endpoint,
+                called_phone_number=trunk_channel.phone,
                 created_at=datetime.now()
             )
 

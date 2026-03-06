@@ -71,6 +71,10 @@ class CallCreatedEventHandler(IEventHandler):
 
     async def __call__(self, event: CallCreatedTelephonyEvent) -> None:
 
+        print("CALL CREATED:")
+        print("  caller:", event.caller_phone_number)
+        print("  called:", event.called_phone_number)
+        print("  MAPPING KEYS:", list(self.__phone_to_agent_mapping.keys()))
         caller_agent = self.__phone_to_agent_mapping.get(event.caller_phone_number, None)
         called_agent = self.__phone_to_agent_mapping.get(event.called_phone_number, None)
 

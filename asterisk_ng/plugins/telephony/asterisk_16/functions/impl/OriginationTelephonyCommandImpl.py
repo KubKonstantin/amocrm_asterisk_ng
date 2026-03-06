@@ -33,7 +33,7 @@ class OriginationTelephonyCommandImpl(IOriginationTelephonyCommand):
         action = Action(
             name="Originate",
             parameters={
-                "Channel": f"Local/{caller_phone_number}@{self.__context}",
+                "Channel": f"PJSIP/{caller_phone_number}",
                 "Context": self.__context,
                 "Exten": called_phone_number,
                 "CallerID": f'"{called_phone_number}"',

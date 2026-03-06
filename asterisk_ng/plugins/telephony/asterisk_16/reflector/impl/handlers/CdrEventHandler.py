@@ -65,7 +65,10 @@ class CdrEventHandler(IAmiEventHandler):
 
         await sleep(3.0)
 
-        cdr_linkedid = event["linkedid"]
+        cdr_linkedid = event.get("Linkedid") or event.get("UniqueID") or event.get("Uniqueid")
+        if not cdr_linkedid:
+            await self.__logger.error(f"Cdr event without linked id: {event}")
+            return
 
         if await self.__reflector.get_ignore_cdr_flag(cdr_linkedid):
             return

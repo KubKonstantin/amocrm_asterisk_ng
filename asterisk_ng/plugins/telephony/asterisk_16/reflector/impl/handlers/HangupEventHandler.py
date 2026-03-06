@@ -17,6 +17,15 @@ __all__ = [
 ]
 
 
+def extract_endpoint(channel_name: str) -> str:
+    """
+    PJSIP/vipma_kkubeev-00000008 -> vipma_kkubeev
+    """
+    try:
+        return channel_name.split("/")[1].split("-")[0]
+    except Exception:
+        return channel_name
+
 class HangupEventHandler(IAmiEventHandler):
 
     __slots__ = (
@@ -52,6 +61,14 @@ class HangupEventHandler(IAmiEventHandler):
 
         call = await self.__reflector.get_call(root_channel.linked_id)
 
+        if len(call.channels_unique_ids) > 1:
+            await self.__logger.debug(
+                f"Skip hangup completion for redirect. linkedid={linked_id}"
+            )
+            return
+
+        agent_endpoint = extract_endpoint(root_channel.name)
+
         for channel_unique_id in call.channels_unique_ids:
             channel = await self.__reflector.get_channel_by_unique_id(channel_unique_id)
 
@@ -59,7 +76,7 @@ class HangupEventHandler(IAmiEventHandler):
                 call_completed_telephony_event = CallCompletedTelephonyEvent(
                     unique_id=linked_id,
                     disposition=CallStatus.ANSWERED,
-                    caller_phone_number=root_channel.phone,
+                    caller_phone_number=agent_endpoint,
                     called_phone_number=channel.phone,
                     created_at=datetime.now()
                 )
@@ -73,7 +90,7 @@ class HangupEventHandler(IAmiEventHandler):
             call_completed_telephony_event = CallCompletedTelephonyEvent(
                 unique_id=linked_id,
                 disposition=CallStatus.NO_ANSWER,
-                caller_phone_number=root_channel.phone,
+                caller_phone_number=agent_endpoint,
                 called_phone_number=called_phone_number,
                 created_at=datetime.now()
             )
@@ -83,4 +100,4 @@ class HangupEventHandler(IAmiEventHandler):
 
         await self.__reflector.save_call_completed_event(linked_id, call_completed_telephony_event)
         await self.__event_bus.publish(call_completed_telephony_event)
-        await self.__reflector.delete_call(root_channel.linked_id)
+#        await self.__reflector.delete_call(root_channel.linked_id)

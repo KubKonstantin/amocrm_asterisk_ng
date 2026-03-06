@@ -1,5 +1,5 @@
 from asyncio import Lock
-
+from typing import Optional
 from asterisk_ng.interfaces import CallCompletedTelephonyEvent
 from asterisk_ng.plugins.system.storage import IKeyValueStorage
 
@@ -27,6 +27,12 @@ class ReflectorImpl(IReflector):
         self.__logger = logger
         self.__lock = Lock()
 
+    def __extract_phone_from_channel(self, channel_name: str) -> Optional[str]:
+        try:
+            return channel_name.split("/")[1].split("-")[0]
+        except Exception:
+            return None
+
     async def add_channel(self, channel: Channel) -> None:
         await self.__storage.set(
             f"channel-unique_id-{channel.unique_id}",
@@ -39,6 +45,17 @@ class ReflectorImpl(IReflector):
             channel.unique_id,
             expire=self.__CHANNEL_TTL
         )
+
+        try:
+            endpoint = channel.name.split("/")[1].split("-")[0]
+            await self.__storage.set(
+                f"unique_id-channel-{endpoint}",
+                channel.unique_id,
+                expire=self.__CHANNEL_TTL
+            )
+        except Exception:
+            pass
+
         await self.__storage.set(
             f"linked_id-channel-{channel.name}",
             channel.linked_id,
@@ -63,7 +80,11 @@ class ReflectorImpl(IReflector):
         return Channel.parse_raw(json_channel)
 
     async def get_channel_by_phone(self, phone: str) -> Channel:
-        unique_id = await self.__storage.get(f"unique_id-channel-{phone}")
+        try:
+            unique_id = await self.__storage.get(f"unique_id-channel-{phone}")
+        except KeyError:
+            # fallback для случая когда передан endpoint
+            unique_id = await self.__storage.get(f"unique_id-channel-PJSIP/{phone}")
         return await self.get_channel_by_unique_id(unique_id)
 
     async def update_channel_state(self, name: str, state: str) -> None:
