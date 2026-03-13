@@ -1,9 +1,6 @@
 from datetime import datetime
-from typing import MutableMapping
-from typing import MutableSequence
 from asyncio import sleep, create_task
 
-from collections import defaultdict
 from asterisk_ng.interfaces import CallReportReadyTelephonyEvent
 from asterisk_ng.interfaces import CallStatus
 
@@ -33,7 +30,6 @@ class CdrEventHandler(IAmiEventHandler):
         "__reflector",
         "__event_bus",
         "__logger",
-        "__event_buffer",
     )
 
     def __init__(
@@ -59,7 +55,14 @@ class CdrEventHandler(IAmiEventHandler):
             raise ValueError(f"Unknown disposition {str_disposition}.")
 
     async def __call__(self, event: Event) -> None:
-        create_task(self.call2(event))
+        task = create_task(self.call2(event))
+        task.add_done_callback(self.__log_task_exception)
+
+    def __log_task_exception(self, task) -> None:
+        try:
+            task.result()
+        except Exception as exc:
+            create_task(self.__logger.error(f"CdrEventHandler task failed: {exc}"))
 
     async def call2(self, event: Event) -> None:
 
@@ -102,7 +105,10 @@ class CdrEventHandler(IAmiEventHandler):
         caller_phone_number = call_completed_event.caller_phone_number
         called_phone_number = call_completed_event.called_phone_number
 
-        unique_id = event["Uniqueid"]
+        unique_id = event.get("Uniqueid") or event.get("UniqueID")
+        if unique_id is None:
+            await self.__logger.error(f"Cdr event without unique id: {event}")
+            return
         duration = int(event["Duration"])
         str_disposition = event["Disposition"]
         str_start_time = event["StartTime"]
