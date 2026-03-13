@@ -84,14 +84,40 @@ class NewStateEventHandler(IAmiEventHandler):
             return
 
         if new_state == "Up":
+        
             await self.__reflector.update_channel_state(channel_name, new_state)
+        
             agent_endpoint = extract_endpoint(agent_channel.name)
+        
+            # ищем номер клиента среди каналов звонка
+            call = await self.__reflector.get_call(linked_id)
+        
+            client_phone = None
+        
+            for channel_unique_id in call.channels_unique_ids:
+                try:
+                    ch = await self.__reflector.get_channel_by_unique_id(channel_unique_id)
+        
+                    if ch.phone and ch.phone.isdigit() and len(ch.phone) >= 10:
+                        client_phone = ch.phone
+                        break
+        
+                except KeyError:
+                    pass
+        
+            if client_phone is None:
+                await self.__logger.debug(
+                    f"Skip CallCreatedTelephonyEvent: client phone not found"
+                )
+                return
+        
             call_created_telephony_event = CallCreatedTelephonyEvent(
                 unique_id=linked_id,
                 caller_phone_number=agent_endpoint,
-                called_phone_number=trunk_channel.phone,
+                called_phone_number=client_phone,
                 created_at=datetime.now()
             )
-
+        
             await self.__event_bus.publish(call_created_telephony_event)
-            return
+        
+            return        

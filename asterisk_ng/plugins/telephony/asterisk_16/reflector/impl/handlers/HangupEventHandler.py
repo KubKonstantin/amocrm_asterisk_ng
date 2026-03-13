@@ -48,56 +48,89 @@ class HangupEventHandler(IAmiEventHandler):
         self.__logger = logger
 
     async def __call__(self, event: Event) -> None:
+
         channel_name = event["Channel"]
         linked_id = event["Linkedid"]
+
+        if "sbc" in channel_name:
+            return
 
         if not self.__is_physical_channel(channel_name):
             return
 
-        root_channel = await self.__reflector.get_channel_by_name(channel_name)
+        try:
+            root_channel = await self.__reflector.get_channel_by_name(channel_name)
+        except KeyError:
+            return
 
-        if root_channel.unique_id != root_channel.linked_id:
-            return  # not root channel
-
-        call = await self.__reflector.get_call(root_channel.linked_id)
-
-        if len(call.channels_unique_ids) > 1:
-            await self.__logger.debug(
-                f"Skip hangup completion for redirect. linkedid={linked_id}"
-            )
+        try:
+            call = await self.__reflector.get_call(linked_id)
+        except KeyError:
             return
 
         agent_endpoint = extract_endpoint(root_channel.name)
 
+        # ---- ищем другие agent каналы ----
+        other_agent_exists = False
+        client_phone = None
+        disposition = CallStatus.NO_ANSWER
+
         for channel_unique_id in call.channels_unique_ids:
-            channel = await self.__reflector.get_channel_by_unique_id(channel_unique_id)
 
-            if channel.state == "up":
-                call_completed_telephony_event = CallCompletedTelephonyEvent(
-                    unique_id=linked_id,
-                    disposition=CallStatus.ANSWERED,
-                    caller_phone_number=agent_endpoint,
-                    called_phone_number=channel.phone,
-                    created_at=datetime.now()
-                )
-                break
-        else:
-            if len(call.channels_unique_ids) == 1:
-                called_phone_number = (await self.__reflector.get_channel_by_unique_id(call.channels_unique_ids[0])).phone
-            else:
-                called_phone_number = None
+            if channel_unique_id == root_channel.unique_id:
+                continue
 
-            call_completed_telephony_event = CallCompletedTelephonyEvent(
-                unique_id=linked_id,
-                disposition=CallStatus.NO_ANSWER,
-                caller_phone_number=agent_endpoint,
-                called_phone_number=called_phone_number,
-                created_at=datetime.now()
+            try:
+                ch = await self.__reflector.get_channel_by_unique_id(channel_unique_id)
+            except KeyError:
+                continue
+
+            endpoint = extract_endpoint(ch.name)
+
+            if endpoint.startswith("vipma_"):
+                other_agent_exists = True
+
+            if endpoint != agent_endpoint and "vipma_" not in endpoint:
+                client_phone = ch.phone
+
+            if ch.state.lower() == "up":
+                disposition = CallStatus.ANSWERED
+
+        # если есть другой агент — это transfer
+        if other_agent_exists:
+            await self.__logger.debug(
+                f"Skip hangup completion (transfer). linkedid={linked_id}"
             )
 
-        for channel_unique_id in call.channels_unique_ids:
-            await self.__reflector.delete_channel_from_call(root_channel.linked_id, channel_unique_id)
+            await self.__reflector.delete_channel_from_call(
+                linked_id,
+                root_channel.unique_id
+            )
 
-        await self.__reflector.save_call_completed_event(linked_id, call_completed_telephony_event)
-        await self.__event_bus.publish(call_completed_telephony_event)
-#        await self.__reflector.delete_call(root_channel.linked_id)
+            return
+
+        # fallback
+        if client_phone is None:
+            client_phone = root_channel.phone
+
+        call_completed_event = CallCompletedTelephonyEvent(
+            unique_id=linked_id,
+            disposition=disposition,
+            caller_phone_number=agent_endpoint,
+            called_phone_number=client_phone,
+            created_at=datetime.now(),
+        )
+
+        # удаляем канал
+        await self.__reflector.delete_channel_from_call(
+            linked_id,
+            root_channel.unique_id
+        )
+
+        # сохраняем
+        await self.__reflector.save_call_completed_event(
+            linked_id,
+            call_completed_event
+        )
+
+        await self.__event_bus.publish(call_completed_event)

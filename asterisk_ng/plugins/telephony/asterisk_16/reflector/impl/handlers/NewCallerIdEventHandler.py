@@ -32,17 +32,34 @@ class NewCallerIdEventHandler(IAmiEventHandler):
         self.__logger = logger
 
     async def __call__(self, event: Event) -> None:
-
+    
         channel_name = event["Channel"]
-        phone_number = event.get("CallerIDNum", None)
-
+    
         if not self.__is_physical_channel(channel_name):
             return
-
+    
+        caller = event.get("CallerIDNum")
+        connected = event.get("ConnectedLineNum")
+    
+        phone_number = caller
+    
+        if "vipma_" in channel_name and connected:
+            phone_number = connected
+    
         if phone_number is None:
             return
-
-        channel = await self.__reflector.get_channel_by_name(event["Channel"])
-
+    
+        # 🔴 игнорируем внутренние номера типа 053100
+        if phone_number.isdigit() and len(phone_number) < 7:
+            return
+    
+        try:
+            channel = await self.__reflector.get_channel_by_name(channel_name)
+        except KeyError:
+            return
+    
         if channel.phone is None:
-            await self.__reflector.update_channel_phone(channel_name, phone=phone_number)
+            await self.__reflector.update_channel_phone(
+                channel_name,
+                phone=phone_number
+            )

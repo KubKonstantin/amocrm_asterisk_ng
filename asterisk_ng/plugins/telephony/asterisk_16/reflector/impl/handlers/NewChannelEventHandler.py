@@ -35,24 +35,23 @@ class NewChannelEventHandler(IAmiEventHandler):
 
     async def __call__(self, event: Event) -> None:
         channel_name: str = event["Channel"]
-        print("NEW CHANNEL:", channel_name)
         unique_id: str = event["Uniqueid"]
         linked_id: str = event["Linkedid"]
         channel_state_desc: str = event["ChannelStateDesc"]
 
         if not self.__is_physical_channel(channel_name):
-            print("NOT PHYSICAL:", channel_name)
-            # The channel is not physical, but root => used origination.
+
             if unique_id == linked_id:
                 self.__origination_linked_id.append(linked_id)
+
             return
 
         phone_number = self.__get_phone_by_channel_name(channel_name)
+
         if phone_number is None:
-            phone_number = event.get("CallerIDNum", None)
+            phone_number = event.get("CallerIDNum")
 
         if linked_id in self.__origination_linked_id:
-            # The first physical channel created after origination will be the root one.
             unique_id = linked_id
 
         channel = Channel(
@@ -62,14 +61,30 @@ class NewChannelEventHandler(IAmiEventHandler):
             state=channel_state_desc.lower(),
             phone=phone_number,
         )
+
         await self.__reflector.add_channel(channel)
 
-        if channel.unique_id == channel.linked_id or channel.linked_id in self.__origination_linked_id:
-            # We create a call if the channel is root or designated as root.
+        # --- FIX ---
+        # создаём call только если его ещё нет
+
+        try:
+            await self.__reflector.get_call(linked_id)
+            call_exists = True
+        except KeyError:
+            call_exists = False
+
+        if (channel.unique_id == channel.linked_id or linked_id in self.__origination_linked_id) and not call_exists:
+
             await self.__reflector.create_call(linked_id=channel.linked_id)
+
             try:
                 self.__origination_linked_id.remove(channel.linked_id)
             except ValueError:
                 pass
+
         else:
-            await self.__reflector.add_channel_to_call(linked_id=channel.linked_id, channel_unique_id=channel.unique_id)
+
+            await self.__reflector.add_channel_to_call(
+                linked_id=channel.linked_id,
+                channel_unique_id=channel.unique_id,
+            )
