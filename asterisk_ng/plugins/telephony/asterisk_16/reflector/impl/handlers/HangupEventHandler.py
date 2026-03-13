@@ -134,6 +134,12 @@ class HangupEventHandler(IAmiEventHandler):
         completion_keys.add(root_channel.unique_id)
 
         for completion_key in completion_keys:
+            try:
+                await self.__reflector.get_call_completed_event(completion_key)
+                continue
+            except KeyError:
+                pass
+
             await self.__reflector.save_call_completed_event(
                 completion_key,
                 call_completed_event
