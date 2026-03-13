@@ -65,22 +65,42 @@ class CdrEventHandler(IAmiEventHandler):
 
         await sleep(3.0)
 
-        cdr_linkedid = event.get("Linkedid") or event.get("UniqueID") or event.get("Uniqueid")
-        if not cdr_linkedid:
+        cdr_linkedid = event.get("Linkedid")
+        cdr_uniqueid = event.get("Uniqueid") or event.get("UniqueID")
+
+        if not cdr_linkedid and not cdr_uniqueid:
             await self.__logger.error(f"Cdr event without linked id: {event}")
             return
 
-        if await self.__reflector.get_ignore_cdr_flag(cdr_linkedid):
+        key_candidates = [
+            key
+            for key in (cdr_linkedid, cdr_uniqueid)
+            if key is not None
+        ]
+
+        for key in key_candidates:
+            if await self.__reflector.get_ignore_cdr_flag(key):
+                return
+
+        call_completed_event = None
+        call_completed_event_key = None
+
+        for key in key_candidates:
+            try:
+                call_completed_event = await self.__reflector.get_call_completed_event(key)
+                call_completed_event_key = key
+                break
+            except KeyError:
+                continue
+
+        if call_completed_event is None:
+            await self.__logger.info(
+                f"Saved CallCompletedEvent not found. linkedid={cdr_linkedid} uniqueid={cdr_uniqueid}"
+            )
             return
 
-        try:
-            call_completed_event = await self.__reflector.get_call_completed_event(cdr_linkedid)
-        except KeyError:
-            await self.__logger.info("Saved CallCompletedEvent not found.")
-            return
-        else:
-            caller_phone_number = call_completed_event.caller_phone_number
-            called_phone_number = call_completed_event.called_phone_number
+        caller_phone_number = call_completed_event.caller_phone_number
+        called_phone_number = call_completed_event.called_phone_number
 
         unique_id = event["Uniqueid"]
         duration = int(event["Duration"])
@@ -117,7 +137,8 @@ class CdrEventHandler(IAmiEventHandler):
         )
 
         await self.__event_bus.publish(call_report_ready_telephony_event)
-        await self.__reflector.set_ignore_cdr_flag(cdr_linkedid)
+        for key in key_candidates:
+            await self.__reflector.set_ignore_cdr_flag(key)
 
         if called_phone_number is not None:
-            await self.__reflector.delete_call_completed_event(cdr_linkedid)
+            await self.__reflector.delete_call_completed_event(call_completed_event_key)
