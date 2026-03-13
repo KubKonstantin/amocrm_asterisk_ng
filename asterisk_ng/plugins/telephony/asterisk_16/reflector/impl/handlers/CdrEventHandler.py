@@ -141,4 +141,12 @@ class CdrEventHandler(IAmiEventHandler):
             await self.__reflector.set_ignore_cdr_flag(key)
 
         if called_phone_number is not None:
+            delete_keys = set(key_candidates)
+            delete_keys.add(call_completed_event_key)
+
+            for key in delete_keys:
+                try:
+                    await self.__reflector.delete_call_completed_event(key)
+                except KeyError:
+                    pass
             await self.__reflector.delete_call_completed_event(call_completed_event_key)
