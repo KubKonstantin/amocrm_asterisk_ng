@@ -202,6 +202,7 @@ class StandardDomainPlugin(AbstractPlugin):
             IRedirectDomainCommand,
             RedirectDomainCommandImpl(
                 active_calls=ACTIVE_CALLS,
+                get_crm_user_id_by_phone_query=self.__dispatcher.get_function(IGetCrmUserIdByPhoneQuery),
                 redirect_telephony_command=self.__dispatcher.get_function(IRedirectTelephonyCommand),
             )
         )
