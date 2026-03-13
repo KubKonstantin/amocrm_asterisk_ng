@@ -1,9 +1,6 @@
 from datetime import datetime
-from typing import MutableMapping
-from typing import MutableSequence
 from asyncio import sleep, create_task
 
-from collections import defaultdict
 from asterisk_ng.interfaces import CallReportReadyTelephonyEvent
 from asterisk_ng.interfaces import CallStatus
 
@@ -33,7 +30,6 @@ class CdrEventHandler(IAmiEventHandler):
         "__reflector",
         "__event_bus",
         "__logger",
-        "__event_buffer",
     )
 
     def __init__(
@@ -59,30 +55,60 @@ class CdrEventHandler(IAmiEventHandler):
             raise ValueError(f"Unknown disposition {str_disposition}.")
 
     async def __call__(self, event: Event) -> None:
-        create_task(self.call2(event))
+        task = create_task(self.call2(event))
+        task.add_done_callback(self.__log_task_exception)
+
+    def __log_task_exception(self, task) -> None:
+        try:
+            task.result()
+        except Exception as exc:
+            create_task(self.__logger.error(f"CdrEventHandler task failed: {exc}"))
 
     async def call2(self, event: Event) -> None:
 
         await sleep(3.0)
 
-        cdr_linkedid = event.get("Linkedid") or event.get("UniqueID") or event.get("Uniqueid")
-        if not cdr_linkedid:
+        cdr_linkedid = event.get("Linkedid")
+        cdr_uniqueid = event.get("Uniqueid") or event.get("UniqueID")
+
+        if not cdr_linkedid and not cdr_uniqueid:
             await self.__logger.error(f"Cdr event without linked id: {event}")
             return
 
-        if await self.__reflector.get_ignore_cdr_flag(cdr_linkedid):
+        key_candidates = [
+            key
+            for key in (cdr_linkedid, cdr_uniqueid)
+            if key is not None
+        ]
+
+        for key in key_candidates:
+            if await self.__reflector.get_ignore_cdr_flag(key):
+                return
+
+        call_completed_event = None
+        call_completed_event_key = None
+
+        for key in key_candidates:
+            try:
+                call_completed_event = await self.__reflector.get_call_completed_event(key)
+                call_completed_event_key = key
+                break
+            except KeyError:
+                continue
+
+        if call_completed_event is None:
+            await self.__logger.info(
+                f"Saved CallCompletedEvent not found. linkedid={cdr_linkedid} uniqueid={cdr_uniqueid}"
+            )
             return
 
-        try:
-            call_completed_event = await self.__reflector.get_call_completed_event(cdr_linkedid)
-        except KeyError:
-            await self.__logger.info("Saved CallCompletedEvent not found.")
-            return
-        else:
-            caller_phone_number = call_completed_event.caller_phone_number
-            called_phone_number = call_completed_event.called_phone_number
+        caller_phone_number = call_completed_event.caller_phone_number
+        called_phone_number = call_completed_event.called_phone_number
 
-        unique_id = event["Uniqueid"]
+        unique_id = event.get("Uniqueid") or event.get("UniqueID")
+        if unique_id is None:
+            await self.__logger.error(f"Cdr event without unique id: {event}")
+            return
         duration = int(event["Duration"])
         str_disposition = event["Disposition"]
         str_start_time = event["StartTime"]
@@ -117,7 +143,15 @@ class CdrEventHandler(IAmiEventHandler):
         )
 
         await self.__event_bus.publish(call_report_ready_telephony_event)
-        await self.__reflector.set_ignore_cdr_flag(cdr_linkedid)
+        for key in key_candidates:
+            await self.__reflector.set_ignore_cdr_flag(key)
 
         if called_phone_number is not None:
-            await self.__reflector.delete_call_completed_event(cdr_linkedid)
+            delete_keys = set(key_candidates)
+            delete_keys.add(call_completed_event_key)
+
+            for key in delete_keys:
+                try:
+                    await self.__reflector.delete_call_completed_event(key)
+                except KeyError:
+                    pass

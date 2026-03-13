@@ -31,7 +31,7 @@ class RedirectMethod(IControllerMethod):
         phone: Optional[str] = None,
     ) -> Optional[Mapping[str, Any]]:
 
-        if phone is None:
+        if phone is None or not phone.strip():
             raise InvalidParamsException()
 
         await self.__redirect_domain_command(
