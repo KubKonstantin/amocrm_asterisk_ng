@@ -1,7 +1,7 @@
 from typing import Callable
 from datetime import datetime
 
-from asterisk_ng.interfaces import CallCreatedTelephonyEvent, RingingTelephonyEvent, CallCompletedTelephonyEvent
+from asterisk_ng.interfaces import CallCreatedTelephonyEvent, RingingTelephonyEvent
 
 from asterisk_ng.plugins.telephony.ami_manager import Event
 from asterisk_ng.plugins.telephony.ami_manager import IAmiEventHandler
@@ -24,6 +24,11 @@ def extract_endpoint(channel_name: str) -> str:
         return channel_name.split("/")[1].split("-")[0]
     except Exception:
         return channel_name
+
+def __is_external_phone(phone: str) -> bool:
+    digits = "".join(ch for ch in phone if ch.isdigit())
+    return len(digits) >= 10
+
 
 class NewStateEventHandler(IAmiEventHandler):
 
@@ -97,14 +102,20 @@ class NewStateEventHandler(IAmiEventHandler):
             for channel_unique_id in call.channels_unique_ids:
                 try:
                     ch = await self.__reflector.get_channel_by_unique_id(channel_unique_id)
-        
-                    if ch.phone and ch.phone.isdigit() and len(ch.phone) >= 10:
+
+                    if ch.phone and __is_external_phone(ch.phone):
                         client_phone = ch.phone
                         break
-        
+
                 except KeyError:
                     pass
-        
+
+            if client_phone is None and root_channel.phone and __is_external_phone(root_channel.phone):
+                client_phone = root_channel.phone
+
+            if client_phone is None and channel.phone and __is_external_phone(channel.phone):
+                client_phone = channel.phone
+
             if client_phone is None:
                 await self.__logger.debug(
                     f"Skip CallCreatedTelephonyEvent: client phone not found"
