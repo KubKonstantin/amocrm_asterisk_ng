@@ -70,12 +70,17 @@ class HangupEventHandler(IAmiEventHandler):
         except KeyError:
             return
 
+        try:
+            linked_root_channel = await self.__reflector.get_channel_by_unique_id(linked_id)
+        except KeyError:
+            linked_root_channel = None
+
         agent_endpoint = extract_endpoint(root_channel.name)
 
         # ---- ищем другие agent каналы ----
         other_agent_exists = False
         client_phone = None
-        disposition = CallStatus.NO_ANSWER
+        disposition = CallStatus.ANSWERED if root_channel.state.lower() == "up" else CallStatus.NO_ANSWER
 
         for channel_unique_id in call.channels_unique_ids:
 
@@ -92,7 +97,7 @@ class HangupEventHandler(IAmiEventHandler):
             if endpoint.startswith("vipma_"):
                 other_agent_exists = True
 
-            if endpoint != agent_endpoint and "vipma_" not in endpoint:
+            if endpoint != agent_endpoint and "vipma_" not in endpoint and ch.phone is not None:
                 client_phone = ch.phone
 
             if ch.state.lower() == "up":
@@ -111,7 +116,13 @@ class HangupEventHandler(IAmiEventHandler):
 
             return
 
-        # fallback
+        # fallback: для inbound берём клиентский номер из корневого trunk-канала linked_id
+        if linked_root_channel is not None:
+            if linked_root_channel.phone is not None:
+                client_phone = linked_root_channel.phone
+            if linked_root_channel.state.lower() == "up":
+                disposition = CallStatus.ANSWERED
+
         if client_phone is None:
             client_phone = root_channel.phone
 

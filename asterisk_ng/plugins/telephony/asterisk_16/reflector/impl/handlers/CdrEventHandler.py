@@ -90,6 +90,9 @@ class CdrEventHandler(IAmiEventHandler):
         if await self.__reflector.get_ignore_cdr_flag(cdr_event_key):
             return
 
+        if await self.__reflector.get_ignore_cdr_flag(unique_id):
+            return
+
         destination = event.get("Destination")
         destination_endpoint = destination if destination and destination.startswith("vipma_") else None
 
@@ -154,6 +157,7 @@ class CdrEventHandler(IAmiEventHandler):
 
         await self.__event_bus.publish(call_report_ready_telephony_event)
         await self.__reflector.set_ignore_cdr_flag(cdr_event_key)
+        await self.__reflector.set_ignore_cdr_flag(unique_id)
 
         if called_phone_number is not None:
             delete_keys = set(lookup_candidates)

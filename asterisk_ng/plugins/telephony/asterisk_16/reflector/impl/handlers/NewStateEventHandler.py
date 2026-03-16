@@ -82,7 +82,22 @@ class NewStateEventHandler(IAmiEventHandler):
         agent_channel, _ = split_channels(channel, root_channel)
         channel_endpoint = extract_endpoint(channel.name)
         root_endpoint = extract_endpoint(root_channel.name)
-        is_inbound_agent_leg = is_agent_endpoint(channel_endpoint) and not is_agent_endpoint(root_endpoint)
+        root_is_trunk = "sbc" in root_channel.name.lower()
+        channel_is_agent = is_agent_endpoint(channel_endpoint)
+
+        is_inbound_agent_leg = (
+            channel_is_agent
+            and (
+                root_is_trunk
+                or not is_agent_endpoint(root_endpoint)
+                or (
+                    root_channel.phone is not None
+                    and is_external_phone(root_channel.phone)
+                    and channel.phone is not None
+                    and not is_external_phone(channel.phone)
+                )
+            )
+        )
 
         if new_state == "Ringing":
             await self.__reflector.update_channel_state(channel_name, new_state)
