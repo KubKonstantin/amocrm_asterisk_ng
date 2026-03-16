@@ -119,6 +119,34 @@ class CdrEventHandler(IAmiEventHandler):
         caller_phone_number = call_completed_event.caller_phone_number
         called_phone_number = call_completed_event.called_phone_number
 
+        for key in key_candidates:
+            if await self.__reflector.get_ignore_cdr_flag(key):
+                return
+
+        call_completed_event = None
+        call_completed_event_key = None
+
+        for key in key_candidates:
+            try:
+                call_completed_event = await self.__reflector.get_call_completed_event(key)
+                call_completed_event_key = key
+                break
+            except KeyError:
+                continue
+
+        if call_completed_event is None:
+            await self.__logger.info(
+                f"Saved CallCompletedEvent not found. linkedid={cdr_linkedid} uniqueid={cdr_uniqueid}"
+            )
+            return
+
+        caller_phone_number = call_completed_event.caller_phone_number
+        called_phone_number = call_completed_event.called_phone_number
+
+        unique_id = event.get("Uniqueid") or event.get("UniqueID")
+        if unique_id is None:
+            await self.__logger.error(f"Cdr event without unique id: {event}")
+            return
         duration = int(event["Duration"])
         str_disposition = event["Disposition"]
         str_start_time = event["StartTime"]
@@ -161,3 +189,16 @@ class CdrEventHandler(IAmiEventHandler):
 
             for key in delete_keys:
                 await self.__reflector.delete_call_completed_event(key)
+        for key in key_candidates:
+            await self.__reflector.set_ignore_cdr_flag(key)
+
+        if called_phone_number is not None:
+            delete_keys = set(key_candidates)
+            delete_keys.add(call_completed_event_key)
+
+            for key in delete_keys:
+                try:
+                    await self.__reflector.delete_call_completed_event(key)
+                except KeyError:
+                    pass
+            await self.__reflector.delete_call_completed_event(call_completed_event_key)

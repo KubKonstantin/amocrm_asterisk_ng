@@ -52,4 +52,21 @@ class RedirectDomainCommandImpl(IRedirectDomainCommand):
         except KeyError:
             return
 
+
+        # переносим активный звонок на нового агента (если это известный внутренний номер)
+        try:
+            redirect_agent_id = await self.__get_crm_user_id_by_phone_query(redirect_phone_number)
+        except KeyError:
+            return
+
+
+
+
+        # переносим активный звонок на нового агента
+        try:
+            redirect_agent_id = await self.__get_crm_user_id_by_phone_query(phone_number)
+        except KeyError:
+            return
+
+        self.__active_calls.pop(user_id, None)
         self.__active_calls[redirect_agent_id] = call_model.copy(update={"agent_id": redirect_agent_id})

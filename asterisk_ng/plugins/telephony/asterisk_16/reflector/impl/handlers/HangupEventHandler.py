@@ -141,6 +141,14 @@ class HangupEventHandler(IAmiEventHandler):
 
             await self.__reflector.save_call_completed_event(
                 f"{completion_key}-agent-{agent_endpoint}",
+            try:
+                await self.__reflector.get_call_completed_event(completion_key)
+                continue
+            except KeyError:
+                pass
+
+            await self.__reflector.save_call_completed_event(
+                completion_key,
                 call_completed_event
             )
 
