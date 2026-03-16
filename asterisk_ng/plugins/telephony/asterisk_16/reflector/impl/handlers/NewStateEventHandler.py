@@ -75,7 +75,7 @@ class NewStateEventHandler(IAmiEventHandler):
                 return ch1, ch2
             return ch1, ch2
 
-        agent_channel, trunk_channel = split_channels(channel, root_channel)
+        agent_channel, _ = split_channels(channel, root_channel)
         if new_state == "Ringing":
             await self.__reflector.update_channel_state(channel_name, new_state)
             agent_endpoint = extract_endpoint(agent_channel.name)
@@ -89,16 +89,16 @@ class NewStateEventHandler(IAmiEventHandler):
             return
 
         if new_state == "Up":
-        
+
             await self.__reflector.update_channel_state(channel_name, new_state)
-        
+
             agent_endpoint = extract_endpoint(agent_channel.name)
-        
+
             # ищем номер клиента среди каналов звонка
             call = await self.__reflector.get_call(linked_id)
-        
+
             client_phone = None
-        
+
             for channel_unique_id in call.channels_unique_ids:
                 try:
                     ch = await self.__reflector.get_channel_by_unique_id(channel_unique_id)
