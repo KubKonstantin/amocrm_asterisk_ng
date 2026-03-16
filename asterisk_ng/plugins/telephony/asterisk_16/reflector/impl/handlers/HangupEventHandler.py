@@ -26,6 +26,8 @@ def extract_endpoint(channel_name: str) -> str:
     except Exception:
         return channel_name
 
+
+
 class HangupEventHandler(IAmiEventHandler):
 
     __slots__ = (
@@ -133,12 +135,12 @@ class HangupEventHandler(IAmiEventHandler):
         completion_keys.add(linked_id)
         completion_keys.add(root_channel.unique_id)
 
-        completion_event_keys = []
+        completion_event_keys = set()
         for completion_key in completion_keys:
-            completion_event_keys.append(completion_key)
-            completion_event_keys.append(f"{completion_key}-agent-{agent_endpoint}")
+            completion_event_keys.add(completion_key)
+            completion_event_keys.add(f"{completion_key}-agent-{agent_endpoint}")
 
-        for completion_event_key in completion_event_keys:
+        for completion_event_key in sorted(completion_event_keys):
             await self.__reflector.save_call_completed_event(
                 completion_event_key,
                 call_completed_event,
