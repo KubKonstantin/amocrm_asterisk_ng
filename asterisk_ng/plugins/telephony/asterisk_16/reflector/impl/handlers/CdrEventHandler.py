@@ -81,6 +81,44 @@ class CdrEventHandler(IAmiEventHandler):
             if key is not None
         ]
 
+        unique_id = event.get("Uniqueid") or event.get("UniqueID")
+        if unique_id is None:
+            await self.__logger.error(f"Cdr event without unique id: {event}")
+            return
+
+        cdr_event_key = f"{unique_id}:{event['StartTime']}:{event['EndTime']}:{event.get('Destination', '')}"
+        if await self.__reflector.get_ignore_cdr_flag(cdr_event_key):
+            return
+
+        destination = event.get("Destination")
+        destination_endpoint = destination if destination and destination.startswith("vipma_") else None
+
+        lookup_candidates = []
+        for key in key_candidates:
+            if destination_endpoint is not None:
+                lookup_candidates.append(f"{key}-agent-{destination_endpoint}")
+            lookup_candidates.append(key)
+
+        call_completed_event = None
+        call_completed_event_key = None
+
+        for key in lookup_candidates:
+            try:
+                call_completed_event = await self.__reflector.get_call_completed_event(key)
+                call_completed_event_key = key
+                break
+            except KeyError:
+                continue
+
+        if call_completed_event is None:
+            await self.__logger.info(
+                f"Saved CallCompletedEvent not found. linkedid={cdr_linkedid} uniqueid={cdr_uniqueid}"
+            )
+            return
+
+        caller_phone_number = call_completed_event.caller_phone_number
+        called_phone_number = call_completed_event.called_phone_number
+
         for key in key_candidates:
             if await self.__reflector.get_ignore_cdr_flag(key):
                 return
@@ -143,6 +181,14 @@ class CdrEventHandler(IAmiEventHandler):
         )
 
         await self.__event_bus.publish(call_report_ready_telephony_event)
+        await self.__reflector.set_ignore_cdr_flag(cdr_event_key)
+
+        if called_phone_number is not None:
+            delete_keys = set(lookup_candidates)
+            delete_keys.add(call_completed_event_key)
+
+            for key in delete_keys:
+                await self.__reflector.delete_call_completed_event(key)
         for key in key_candidates:
             await self.__reflector.set_ignore_cdr_flag(key)
 

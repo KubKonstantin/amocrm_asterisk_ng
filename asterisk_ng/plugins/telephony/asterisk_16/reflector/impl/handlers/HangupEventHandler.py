@@ -134,6 +134,13 @@ class HangupEventHandler(IAmiEventHandler):
         completion_keys.add(root_channel.unique_id)
 
         for completion_key in completion_keys:
+            await self.__reflector.save_call_completed_event(
+                completion_key,
+                call_completed_event
+            )
+
+            await self.__reflector.save_call_completed_event(
+                f"{completion_key}-agent-{agent_endpoint}",
             try:
                 await self.__reflector.get_call_completed_event(completion_key)
                 continue

@@ -61,6 +61,7 @@ class RedirectDomainCommandImpl(IRedirectDomainCommand):
 
 
 
+
         # переносим активный звонок на нового агента
         try:
             redirect_agent_id = await self.__get_crm_user_id_by_phone_query(phone_number)
