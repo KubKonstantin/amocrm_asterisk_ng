@@ -25,7 +25,7 @@ def extract_endpoint(channel_name: str) -> str:
     except Exception:
         return channel_name
 
-def __is_external_phone(phone: str) -> bool:
+def is_external_phone(phone: str) -> bool:
     digits = "".join(ch for ch in phone if ch.isdigit())
     return len(digits) >= 10
 
@@ -103,17 +103,17 @@ class NewStateEventHandler(IAmiEventHandler):
                 try:
                     ch = await self.__reflector.get_channel_by_unique_id(channel_unique_id)
 
-                    if ch.phone and __is_external_phone(ch.phone):
+                    if ch.phone and is_external_phone(ch.phone):
                         client_phone = ch.phone
                         break
 
                 except KeyError:
                     pass
 
-            if client_phone is None and root_channel.phone and __is_external_phone(root_channel.phone):
+            if client_phone is None and root_channel.phone and is_external_phone(root_channel.phone):
                 client_phone = root_channel.phone
 
-            if client_phone is None and channel.phone and __is_external_phone(channel.phone):
+            if client_phone is None and channel.phone and is_external_phone(channel.phone):
                 client_phone = channel.phone
 
             if client_phone is None:
