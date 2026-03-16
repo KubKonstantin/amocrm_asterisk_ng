@@ -26,6 +26,8 @@ def extract_endpoint(channel_name: str) -> str:
     except Exception:
         return channel_name
 
+
+
 class HangupEventHandler(IAmiEventHandler):
 
     __slots__ = (
@@ -68,12 +70,17 @@ class HangupEventHandler(IAmiEventHandler):
         except KeyError:
             return
 
+        try:
+            linked_root_channel = await self.__reflector.get_channel_by_unique_id(linked_id)
+        except KeyError:
+            linked_root_channel = None
+
         agent_endpoint = extract_endpoint(root_channel.name)
 
         # ---- ищем другие agent каналы ----
         other_agent_exists = False
         client_phone = None
-        disposition = CallStatus.NO_ANSWER
+        disposition = CallStatus.ANSWERED if root_channel.state.lower() == "up" else CallStatus.NO_ANSWER
 
         for channel_unique_id in call.channels_unique_ids:
 
@@ -90,7 +97,7 @@ class HangupEventHandler(IAmiEventHandler):
             if endpoint.startswith("vipma_"):
                 other_agent_exists = True
 
-            if endpoint != agent_endpoint and "vipma_" not in endpoint:
+            if endpoint != agent_endpoint and "vipma_" not in endpoint and ch.phone is not None:
                 client_phone = ch.phone
 
             if ch.state.lower() == "up":
@@ -109,7 +116,13 @@ class HangupEventHandler(IAmiEventHandler):
 
             return
 
-        # fallback
+        # fallback: для inbound берём клиентский номер из корневого trunk-канала linked_id
+        if linked_root_channel is not None:
+            if linked_root_channel.phone is not None:
+                client_phone = linked_root_channel.phone
+            if linked_root_channel.state.lower() == "up":
+                disposition = CallStatus.ANSWERED
+
         if client_phone is None:
             client_phone = root_channel.phone
 
@@ -127,10 +140,21 @@ class HangupEventHandler(IAmiEventHandler):
             root_channel.unique_id
         )
 
-        # сохраняем
-        await self.__reflector.save_call_completed_event(
-            linked_id,
-            call_completed_event
-        )
+        # сохраняем под linked_id и всеми известными unique_id звонка,
+        # чтобы CDR мог найти событие даже если приходит без Linkedid
+        completion_keys = set(call.channels_unique_ids)
+        completion_keys.add(linked_id)
+        completion_keys.add(root_channel.unique_id)
+
+        completion_event_keys = set()
+        for completion_key in completion_keys:
+            completion_event_keys.add(completion_key)
+            completion_event_keys.add(f"{completion_key}-agent-{agent_endpoint}")
+
+        for completion_event_key in sorted(completion_event_keys):
+            await self.__reflector.save_call_completed_event(
+                completion_event_key,
+                call_completed_event,
+            )
 
         await self.__event_bus.publish(call_completed_event)
