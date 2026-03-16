@@ -32,7 +32,6 @@ class RedirectMethod(IControllerMethod):
 
         if phone is None or not phone.strip():
             return None
-            raise InvalidParamsException()
 
         await self.__redirect_domain_command(
             user_id=CrmUserId(id=amouser_id, email=amouser_email),
