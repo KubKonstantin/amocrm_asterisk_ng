@@ -30,6 +30,7 @@ class CdrEventHandler(IAmiEventHandler):
         "__reflector",
         "__event_bus",
         "__logger",
+        "__agent_endpoint_prefix",
     )
 
     def __init__(
@@ -37,10 +38,16 @@ class CdrEventHandler(IAmiEventHandler):
         reflector: IReflector,
         event_bus: IEventBus,
         logger: ILogger,
+        agent_endpoint_prefix: str,
     ) -> None:
         self.__reflector = reflector
         self.__event_bus = event_bus
         self.__logger = logger
+        self.__agent_endpoint_prefix = self.__normalize_agent_endpoint_prefix(agent_endpoint_prefix)
+
+
+    def __normalize_agent_endpoint_prefix(self, prefix: str) -> str:
+        return prefix if prefix.endswith("_") else f"{prefix}_"
 
     def __convert_datetime(self, str_datetime) -> datetime:
         return datetime.strptime(str_datetime, "%Y-%m-%d %H:%M:%S")
@@ -94,7 +101,7 @@ class CdrEventHandler(IAmiEventHandler):
             return
 
         destination = event.get("Destination")
-        destination_endpoint = destination if destination and destination.startswith("vipma_") else None
+        destination_endpoint = destination if destination and destination.startswith(self.__agent_endpoint_prefix) else None
 
         lookup_candidates = []
         if destination_endpoint is not None:

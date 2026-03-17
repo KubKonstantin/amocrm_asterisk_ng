@@ -18,14 +18,10 @@ __all__ = [
 
 
 def extract_endpoint(channel_name: str) -> str:
-    """
-    PJSIP/vipma_kkubeev-00000008 -> vipma_kkubeev
-    """
     try:
         return channel_name.split("/")[1].split("-")[0]
     except Exception:
         return channel_name
-
 
 
 class HangupEventHandler(IAmiEventHandler):
@@ -35,6 +31,7 @@ class HangupEventHandler(IAmiEventHandler):
         "__event_bus",
         "__reflector",
         "__logger",
+        "__agent_endpoint_prefix",
     )
 
     def __init__(
@@ -43,11 +40,16 @@ class HangupEventHandler(IAmiEventHandler):
         reflector: IReflector,
         event_bus: IEventBus,
         logger: ILogger,
+        agent_endpoint_prefix: str,
     ) -> None:
         self.__is_physical_channel = is_physical_channel
         self.__reflector = reflector
         self.__event_bus = event_bus
         self.__logger = logger
+        self.__agent_endpoint_prefix = self.__normalize_agent_endpoint_prefix(agent_endpoint_prefix)
+
+    def __normalize_agent_endpoint_prefix(self, prefix: str) -> str:
+        return prefix if prefix.endswith("_") else f"{prefix}_"
 
     async def __call__(self, event: Event) -> None:
 
@@ -77,7 +79,6 @@ class HangupEventHandler(IAmiEventHandler):
 
         agent_endpoint = extract_endpoint(root_channel.name)
 
-        # ---- ищем другие agent каналы ----
         other_agent_exists = False
         client_phone = None
         disposition = CallStatus.ANSWERED if root_channel.state.lower() == "up" else CallStatus.NO_ANSWER
@@ -94,16 +95,15 @@ class HangupEventHandler(IAmiEventHandler):
 
             endpoint = extract_endpoint(ch.name)
 
-            if endpoint.startswith("vipma_"):
+            if endpoint.startswith(self.__agent_endpoint_prefix):
                 other_agent_exists = True
 
-            if endpoint != agent_endpoint and "vipma_" not in endpoint and ch.phone is not None:
+            if endpoint != agent_endpoint and self.__agent_endpoint_prefix not in endpoint and ch.phone is not None:
                 client_phone = ch.phone
 
             if ch.state.lower() == "up":
                 disposition = CallStatus.ANSWERED
 
-        # если есть другой агент — это transfer
         if other_agent_exists:
             await self.__logger.debug(
                 f"Skip hangup completion (transfer). linkedid={linked_id}"
@@ -116,7 +116,6 @@ class HangupEventHandler(IAmiEventHandler):
 
             return
 
-        # fallback: для inbound берём клиентский номер из корневого trunk-канала linked_id
         if linked_root_channel is not None:
             if linked_root_channel.phone is not None:
                 client_phone = linked_root_channel.phone
@@ -147,14 +146,11 @@ class HangupEventHandler(IAmiEventHandler):
             created_at=datetime.now(),
         )
 
-        # удаляем канал
         await self.__reflector.delete_channel_from_call(
             linked_id,
             root_channel.unique_id
         )
 
-        # сохраняем под linked_id и всеми известными unique_id звонка,
-        # чтобы CDR мог найти событие даже если приходит без Linkedid
         completion_keys = set(call.channels_unique_ids)
         completion_keys.add(linked_id)
         completion_keys.add(root_channel.unique_id)
