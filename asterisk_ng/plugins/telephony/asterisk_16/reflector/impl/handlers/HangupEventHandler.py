@@ -126,11 +126,24 @@ class HangupEventHandler(IAmiEventHandler):
         if client_phone is None:
             client_phone = root_channel.phone
 
+        caller_phone_number = agent_endpoint
+        called_phone_number = client_phone
+
+        is_inbound = (
+            linked_root_channel is not None
+            and "sbc" in linked_root_channel.name.lower()
+            and root_channel.name != linked_root_channel.name
+        )
+
+        if is_inbound:
+            caller_phone_number = client_phone
+            called_phone_number = agent_endpoint
+
         call_completed_event = CallCompletedTelephonyEvent(
             unique_id=linked_id,
             disposition=disposition,
-            caller_phone_number=agent_endpoint,
-            called_phone_number=client_phone,
+            caller_phone_number=caller_phone_number,
+            called_phone_number=called_phone_number,
             created_at=datetime.now(),
         )
 

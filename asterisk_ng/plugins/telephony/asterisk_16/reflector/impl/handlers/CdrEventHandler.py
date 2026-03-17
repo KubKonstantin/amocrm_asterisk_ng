@@ -97,10 +97,12 @@ class CdrEventHandler(IAmiEventHandler):
         destination_endpoint = destination if destination and destination.startswith("vipma_") else None
 
         lookup_candidates = []
-        for key in key_candidates:
-            if destination_endpoint is not None:
+        if destination_endpoint is not None:
+            for key in key_candidates:
                 lookup_candidates.append(f"{key}-agent-{destination_endpoint}")
-            lookup_candidates.append(key)
+        else:
+            for key in key_candidates:
+                lookup_candidates.append(key)
 
         call_completed_event = None
         call_completed_event_key = None
@@ -112,6 +114,15 @@ class CdrEventHandler(IAmiEventHandler):
                 break
             except KeyError:
                 continue
+
+        if call_completed_event is None and destination_endpoint is not None:
+            for key in key_candidates:
+                try:
+                    call_completed_event = await self.__reflector.get_call_completed_event(key)
+                    call_completed_event_key = key
+                    break
+                except KeyError:
+                    continue
 
         if call_completed_event is None:
             await self.__logger.info(
