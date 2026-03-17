@@ -82,9 +82,11 @@ class CdrEventHandler(IAmiEventHandler):
             await self.__logger.error(f"Cdr event without linked id: {event}")
             return
 
+        # В приоритете uniqueid, т.к. linkedid общий для всех leg-ов вызова
+        # и при переводах может указывать на "последний" сохраненный event.
         key_candidates = [
             key
-            for key in (cdr_linkedid, cdr_uniqueid)
+            for key in (cdr_uniqueid, cdr_linkedid)
             if key is not None
         ]
 
