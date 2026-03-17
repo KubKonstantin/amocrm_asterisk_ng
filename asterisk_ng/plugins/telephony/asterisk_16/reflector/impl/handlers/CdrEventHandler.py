@@ -1,9 +1,6 @@
 from datetime import datetime
-from typing import MutableMapping
-from typing import MutableSequence
 from asyncio import sleep, create_task
 
-from collections import defaultdict
 from asterisk_ng.interfaces import CallReportReadyTelephonyEvent
 from asterisk_ng.interfaces import CallStatus
 
@@ -17,6 +14,12 @@ from ...core import IReflector
 
 
 __all__ = ["CdrEventHandler"]
+
+def extract_endpoint(channel_name: str) -> str:
+    try:
+        return channel_name.split("/")[1].split("-")[0]
+    except Exception:
+        return channel_name
 
 
 class CdrEventHandler(IAmiEventHandler):
@@ -33,7 +36,7 @@ class CdrEventHandler(IAmiEventHandler):
         "__reflector",
         "__event_bus",
         "__logger",
-        "__event_buffer",
+        "__agent_endpoint_prefix",
     )
 
     def __init__(
@@ -41,10 +44,16 @@ class CdrEventHandler(IAmiEventHandler):
         reflector: IReflector,
         event_bus: IEventBus,
         logger: ILogger,
+        agent_endpoint_prefix: str,
     ) -> None:
         self.__reflector = reflector
         self.__event_bus = event_bus
         self.__logger = logger
+        self.__agent_endpoint_prefix = self.__normalize_agent_endpoint_prefix(agent_endpoint_prefix)
+
+
+    def __normalize_agent_endpoint_prefix(self, prefix: str) -> str:
+        return prefix if prefix.endswith("_") else f"{prefix}_"
 
     def __convert_datetime(self, str_datetime) -> datetime:
         return datetime.strptime(str_datetime, "%Y-%m-%d %H:%M:%S")
@@ -59,30 +68,95 @@ class CdrEventHandler(IAmiEventHandler):
             raise ValueError(f"Unknown disposition {str_disposition}.")
 
     async def __call__(self, event: Event) -> None:
-        create_task(self.call2(event))
+        task = create_task(self.call2(event))
+        task.add_done_callback(self.__log_task_exception)
+
+    def __log_task_exception(self, task) -> None:
+        try:
+            task.result()
+        except Exception as exc:
+            create_task(self.__logger.error(f"CdrEventHandler task failed: {exc}"))
 
     async def call2(self, event: Event) -> None:
 
         await sleep(3.0)
 
-        cdr_linkedid = event.get("Linkedid") or event.get("UniqueID") or event.get("Uniqueid")
-        if not cdr_linkedid:
+        cdr_linkedid = event.get("Linkedid")
+        cdr_uniqueid = event.get("Uniqueid") or event.get("UniqueID")
+
+        if not cdr_linkedid and not cdr_uniqueid:
             await self.__logger.error(f"Cdr event without linked id: {event}")
             return
 
-        if await self.__reflector.get_ignore_cdr_flag(cdr_linkedid):
+        # В приоритете uniqueid, т.к. linkedid общий для всех leg-ов вызова
+        # и при переводах может указывать на "последний" сохраненный event.
+        key_candidates = [
+            key
+            for key in (cdr_uniqueid, cdr_linkedid)
+            if key is not None
+        ]
+
+        unique_id = event.get("Uniqueid") or event.get("UniqueID")
+        if unique_id is None:
+            await self.__logger.error(f"Cdr event without unique id: {event}")
             return
 
-        try:
-            call_completed_event = await self.__reflector.get_call_completed_event(cdr_linkedid)
-        except KeyError:
-            await self.__logger.info("Saved CallCompletedEvent not found.")
+        cdr_event_key = f"{unique_id}:{event['StartTime']}:{event['EndTime']}:{event.get('Destination', '')}"
+        if await self.__reflector.get_ignore_cdr_flag(cdr_event_key):
             return
+
+        if await self.__reflector.get_ignore_cdr_flag(unique_id):
+            return
+
+        destination_channel = event.get("DestinationChannel")
+        destination = event.get("Destination")
+
+        destination_endpoint = None
+        if destination_channel is not None:
+            endpoint = extract_endpoint(destination_channel)
+            if endpoint.startswith(self.__agent_endpoint_prefix):
+                destination_endpoint = endpoint
+
+        if destination_endpoint is None and destination and destination.startswith(self.__agent_endpoint_prefix):
+            destination_endpoint = destination
+
+        lookup_candidates = []
+        if destination_endpoint is not None:
+            for key in key_candidates:
+                lookup_candidates.append(f"{key}-agent-{destination_endpoint}")
         else:
-            caller_phone_number = call_completed_event.caller_phone_number
-            called_phone_number = call_completed_event.called_phone_number
+            for key in key_candidates:
+                lookup_candidates.append(key)
 
-        unique_id = event["Uniqueid"]
+        call_completed_event = None
+        call_completed_event_key = None
+
+        for key in lookup_candidates:
+            try:
+                call_completed_event = await self.__reflector.get_call_completed_event(key)
+                call_completed_event_key = key
+                break
+            except KeyError:
+                continue
+
+        if call_completed_event is None and destination_endpoint is not None:
+            for key in key_candidates:
+                try:
+                    call_completed_event = await self.__reflector.get_call_completed_event(key)
+                    call_completed_event_key = key
+                    break
+                except KeyError:
+                    continue
+
+        if call_completed_event is None:
+            await self.__logger.info(
+                f"Saved CallCompletedEvent not found. linkedid={cdr_linkedid} uniqueid={cdr_uniqueid}"
+            )
+            return
+
+        caller_phone_number = call_completed_event.caller_phone_number
+        called_phone_number = call_completed_event.called_phone_number
+
         duration = int(event["Duration"])
         str_disposition = event["Disposition"]
         str_start_time = event["StartTime"]
@@ -117,7 +191,12 @@ class CdrEventHandler(IAmiEventHandler):
         )
 
         await self.__event_bus.publish(call_report_ready_telephony_event)
-        await self.__reflector.set_ignore_cdr_flag(cdr_linkedid)
+        await self.__reflector.set_ignore_cdr_flag(cdr_event_key)
+        await self.__reflector.set_ignore_cdr_flag(unique_id)
 
         if called_phone_number is not None:
-            await self.__reflector.delete_call_completed_event(cdr_linkedid)
+            delete_keys = set(lookup_candidates)
+            delete_keys.add(call_completed_event_key)
+
+            for key in delete_keys:
+                await self.__reflector.delete_call_completed_event(key)
