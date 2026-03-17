@@ -88,13 +88,6 @@ class CdrEventHandler(IAmiEventHandler):
             await self.__logger.error(f"Cdr event without linked id: {event}")
             return
 
-        # В приоритете uniqueid, т.к. linkedid общий для всех leg-ов вызова
-        # и при переводах может указывать на "последний" сохраненный event.
-        key_candidates = [
-            key
-            for key in (cdr_uniqueid, cdr_linkedid)
-            if key is not None
-        ]
 
         unique_id = event.get("Uniqueid") or event.get("UniqueID")
         if unique_id is None:
@@ -105,20 +98,31 @@ class CdrEventHandler(IAmiEventHandler):
         if await self.__reflector.get_ignore_cdr_flag(cdr_event_key):
             return
 
-        if await self.__reflector.get_ignore_cdr_flag(unique_id):
-            return
-
         destination_channel = event.get("DestinationChannel")
         destination = event.get("Destination")
 
         destination_endpoint = None
+        destination_channel_unique_id = None
+
         if destination_channel is not None:
             endpoint = extract_endpoint(destination_channel)
             if endpoint.startswith(self.__agent_endpoint_prefix):
                 destination_endpoint = endpoint
+                try:
+                    destination_channel_unique_id = (await self.__reflector.get_channel_by_name(destination_channel)).unique_id
+                except Exception:
+                    destination_channel_unique_id = None
 
         if destination_endpoint is None and destination and destination.startswith(self.__agent_endpoint_prefix):
             destination_endpoint = destination
+
+        # На редиректах trunk uniqueid один и тот же для нескольких CDR,
+        # поэтому сначала пробуем unique_id destination-канала агента.
+        key_candidates = [
+            key
+            for key in (destination_channel_unique_id, cdr_uniqueid, cdr_linkedid)
+            if key is not None
+        ]
 
         lookup_candidates = []
         if destination_endpoint is not None:
@@ -192,7 +196,6 @@ class CdrEventHandler(IAmiEventHandler):
 
         await self.__event_bus.publish(call_report_ready_telephony_event)
         await self.__reflector.set_ignore_cdr_flag(cdr_event_key)
-        await self.__reflector.set_ignore_cdr_flag(unique_id)
 
         if called_phone_number is not None:
             delete_keys = set(lookup_candidates)
