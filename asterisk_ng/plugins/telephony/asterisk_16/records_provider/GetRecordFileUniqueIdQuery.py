@@ -1,13 +1,18 @@
+import json
 import os
+import re
 from typing import Any
 from typing import Coroutine
 from typing import Callable
 from typing import Optional
 from typing import Tuple
+from urllib.error import HTTPError, URLError
+from urllib.request import Request, urlopen
 
 import aiofiles
 from aiomysql.connection import Connection
 from pymysql.err import MySQLError
+
 from asterisk_ng.interfaces import File
 from asterisk_ng.interfaces import Filetype
 from asterisk_ng.interfaces import IGetRecordFileByUniqueIdQuery
@@ -53,6 +58,64 @@ class GetRecordFileByUniqueIdQuery(IGetRecordFileByUniqueIdQuery):
             content = await f.read()
         return content
 
+    @classmethod
+    def __get_filetype(cls, filename: str) -> Filetype:
+        extension = filename.split(".")[-1].lower()
+        return cls.__EXTENSIONS[extension]
+
+    @classmethod
+    def __extract_client_from_record_filename(cls, filename: str) -> Optional[str]:
+        match = re.match(r"^25_([^|]+)\|", filename)
+        if match is None:
+            return None
+        return match.group(1)
+
+    async def __fetch_file_from_external_service(self, filename: str) -> bytes:
+        service_url = self.__config.external_records_service_url
+        if service_url is None:
+            raise RuntimeError("external records service url is not configured")
+
+        service_url = service_url.rstrip("/")
+
+        client_id = self.__extract_client_from_record_filename(filename)
+        if client_id is None:
+            client_id = self.__config.external_records_service_default_client
+
+        if client_id is None:
+            raise ValueError(
+                f"Unable to resolve X-Client for filename `{filename}`. "
+                "Set external_records_service_default_client in config."
+            )
+
+        timeout = self.__config.external_records_service_timeout
+
+        decrypt_request = Request(
+            f"{service_url}/decrypt",
+            data=json.dumps({
+                "record_file": filename,
+                "X-Client": client_id,
+            }).encode("utf-8"),
+            headers={"Content-Type": "application/json"},
+            method="POST",
+        )
+
+        try:
+            with urlopen(decrypt_request, timeout=timeout) as response:
+                decrypt_payload = json.loads(response.read().decode("utf-8"))
+        except (HTTPError, URLError) as exc:
+            raise RuntimeError(f"Failed to call decrypt endpoint: {exc}")
+
+        download_url = decrypt_payload.get("download_url")
+        if download_url is None:
+            raise RuntimeError(f"External service response has no download_url: {decrypt_payload}")
+
+        download_request = Request(f"{service_url}{download_url}", method="GET")
+        try:
+            with urlopen(download_request, timeout=timeout) as response:
+                return response.read()
+        except (HTTPError, URLError) as exc:
+            raise RuntimeError(f"Failed to download decrypted file: {exc}")
+
     async def __get_fileinfo(self, unique_id: str) -> Tuple[str, str]:
         async with self.__connection.cursor() as cur:
             await cur.execute(
@@ -82,6 +145,15 @@ class GetRecordFileByUniqueIdQuery(IGetRecordFileByUniqueIdQuery):
             self.__connection = await self.__get_connection()
             date, filename = await self.__get_fileinfo(unique_id=unique_id)
 
+        if self.__config.external_records_service_url is not None:
+            content = await self.__fetch_file_from_external_service(filename=filename)
+            filetype = self.__get_filetype(filename)
+            return File(
+                name=filename,
+                type=filetype,
+                content=content,
+            )
+
         directory_path = date.strftime(self.__config.media_root).rstrip('/')
         file_path = os.path.join(directory_path, filename)
 
@@ -92,8 +164,7 @@ class GetRecordFileByUniqueIdQuery(IGetRecordFileByUniqueIdQuery):
 
         content = await self.__get_content_from_file(file_path)
 
-        extension = filename.split(".")[-1]
-        filetype = self.__EXTENSIONS[extension]
+        filetype = self.__get_filetype(filename)
 
         return File(
             name=filename,
