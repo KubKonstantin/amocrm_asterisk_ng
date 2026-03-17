@@ -15,6 +15,12 @@ from ...core import IReflector
 
 __all__ = ["CdrEventHandler"]
 
+def extract_endpoint(channel_name: str) -> str:
+    try:
+        return channel_name.split("/")[1].split("-")[0]
+    except Exception:
+        return channel_name
+
 
 class CdrEventHandler(IAmiEventHandler):
 
@@ -102,8 +108,17 @@ class CdrEventHandler(IAmiEventHandler):
         if await self.__reflector.get_ignore_cdr_flag(unique_id):
             return
 
+        destination_channel = event.get("DestinationChannel")
         destination = event.get("Destination")
-        destination_endpoint = destination if destination and destination.startswith(self.__agent_endpoint_prefix) else None
+
+        destination_endpoint = None
+        if destination_channel is not None:
+            endpoint = extract_endpoint(destination_channel)
+            if endpoint.startswith(self.__agent_endpoint_prefix):
+                destination_endpoint = endpoint
+
+        if destination_endpoint is None and destination and destination.startswith(self.__agent_endpoint_prefix):
+            destination_endpoint = destination
 
         lookup_candidates = []
         if destination_endpoint is not None:
