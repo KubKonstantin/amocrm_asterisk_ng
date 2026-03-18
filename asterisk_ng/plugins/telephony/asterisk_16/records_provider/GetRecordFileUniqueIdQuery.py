@@ -245,6 +245,15 @@ class GetRecordFileByUniqueIdQuery(IGetRecordFileByUniqueIdQuery):
                 content=content,
             )
 
+        if self.__config.external_records_service_url is not None:
+            content = await self.__fetch_file_from_external_service(filename=filename)
+            filetype = self.__get_filetype(filename)
+            return File(
+                name=filename,
+                type=filetype,
+                content=content,
+            )
+
         directory_path = date.strftime(self.__config.media_root).rstrip('/')
         file_path = os.path.join(directory_path, filename)
 
