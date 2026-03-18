@@ -137,15 +137,15 @@ class GetRecordFileByUniqueIdQuery(IGetRecordFileByUniqueIdQuery):
             finally:
                 await cur.close()
 
-    async def __get_fileinfo_by_linkedid(self, unique_id: str) -> Tuple[str, str]:
+    async def __get_fileinfo_by_recordingfile(self, unique_id: str) -> Tuple[str, str]:
         async with self.__connection.cursor() as cur:
             await cur.execute(
                 f"SELECT {self.__config.calldate_column}, "
                 f"{self.__config.recordingfile_column} "
                 f"FROM {self.__config.cdr_table} "
-                f"WHERE {self.__config.linkedid_column}=%s "
+                f"WHERE {self.__config.recordingfile_column} LIKE %s "
                 f"ORDER BY {self.__config.calldate_column} DESC LIMIT 1",
-                (unique_id,),
+                (f"%{unique_id}%",),
             )
 
             try:
@@ -154,7 +154,7 @@ class GetRecordFileByUniqueIdQuery(IGetRecordFileByUniqueIdQuery):
                     raise TypeError
                 return date, filename
             except TypeError:
-                raise FileNotFoundError(f"File with unique_id: `{unique_id}` not found by linkedid.")
+                raise FileNotFoundError(f"File with unique_id: `{unique_id}` not found by recordingfile.")
             finally:
                 await cur.close()
 
@@ -163,9 +163,9 @@ class GetRecordFileByUniqueIdQuery(IGetRecordFileByUniqueIdQuery):
             return await self.__get_fileinfo_by_uniqueid(unique_id)
         except FileNotFoundError:
             await self.__logger.debug(
-                f"Record file for unique_id `{unique_id}` was not found by uniqueid; fallback to linkedid."
+                f"Record file for unique_id `{unique_id}` was not found by uniqueid; fallback to recordingfile."
             )
-            return await self.__get_fileinfo_by_linkedid(unique_id)
+            return await self.__get_fileinfo_by_recordingfile(unique_id)
 
     async def __call__(self, unique_id: str) -> File:
         if not is_valid_unique_id(unique_id):

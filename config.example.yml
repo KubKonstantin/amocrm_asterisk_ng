@@ -120,7 +120,6 @@ dynamic:
           password: password
           database: asteriskcdrdb
         media_root: "/var/spool/asterisk/monitor/%Y/%m/%d/"
-        linkedid_column: "linkedid"
         # Optional: fetch records via external decrypt/download service instead of local filesystem.
         # If enabled, connector will call POST {external_records_service_url}/decrypt and then GET download_url.
         external_records_service_url: "http://127.0.0.1:5000"
