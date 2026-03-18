@@ -19,6 +19,7 @@ class NewCallerIdEventHandler(IAmiEventHandler):
         "__is_physical_channel",
         "__reflector",
         "__logger",
+        "__agent_endpoint_prefix",
     )
 
     def __init__(
@@ -26,10 +27,15 @@ class NewCallerIdEventHandler(IAmiEventHandler):
         is_physical_channel: Callable[[str], bool],
         reflector: IReflector,
         logger: ILogger,
+        agent_endpoint_prefix: str,
     ) -> None:
         self.__is_physical_channel = is_physical_channel
         self.__reflector = reflector
         self.__logger = logger
+        self.__agent_endpoint_prefix = self.__normalize_agent_endpoint_prefix(agent_endpoint_prefix)
+
+    def __normalize_agent_endpoint_prefix(self, prefix: str) -> str:
+        return prefix if prefix.endswith("_") else f"{prefix}_"
 
     async def __call__(self, event: Event) -> None:
     
@@ -43,7 +49,7 @@ class NewCallerIdEventHandler(IAmiEventHandler):
     
         phone_number = caller
     
-        if "vipma_" in channel_name and connected:
+        if f"/{self.__agent_endpoint_prefix}" in channel_name and connected:
             phone_number = connected
     
         if phone_number is None:
