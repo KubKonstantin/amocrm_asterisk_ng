@@ -121,7 +121,8 @@ class GetRecordFileByUniqueIdQuery(IGetRecordFileByUniqueIdQuery):
             await cur.execute(
                 f"SELECT {self.__config.calldate_column}, "
                 f"{self.__config.recordingfile_column} "
-                f"FROM {self.__config.cdr_table} WHERE uniqueid={unique_id}"
+                f"FROM {self.__config.cdr_table} WHERE uniqueid=%s",
+                (unique_id,),
             )
 
             try:
