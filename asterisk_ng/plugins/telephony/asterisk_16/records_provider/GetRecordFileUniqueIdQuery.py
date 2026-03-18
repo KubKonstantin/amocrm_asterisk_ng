@@ -89,7 +89,7 @@ class GetRecordFileByUniqueIdQuery(IGetRecordFileByUniqueIdQuery):
 
         timeout = self.__config.external_records_service_timeout
 
-        await self.__logger.debug(f"Fetching record from external service via /decrypt. filename={filename} client={client_id}")
+        await self.__logger.info(f"[records_provider] external /decrypt start filename={filename} client={client_id}")
 
         decrypt_request = Request(
             f"{service_url}/decrypt",
@@ -132,7 +132,7 @@ class GetRecordFileByUniqueIdQuery(IGetRecordFileByUniqueIdQuery):
             )
 
         timeout = self.__config.external_records_service_timeout
-        await self.__logger.debug(f"Searching record in external service via /search-file. unique_id={unique_id} client={client_id}")
+        await self.__logger.info(f"[records_provider] external /search-file start unique_id={unique_id} client={client_id}")
 
         search_request = Request(
             f"{service_url}/search-file",
@@ -213,12 +213,17 @@ class GetRecordFileByUniqueIdQuery(IGetRecordFileByUniqueIdQuery):
         try:
             return await self.__get_fileinfo_by_uniqueid(unique_id)
         except FileNotFoundError:
-            await self.__logger.debug(
-                f"Record file for unique_id `{unique_id}` was not found by uniqueid; fallback to recordingfile."
+            await self.__logger.info(
+                f"[records_provider] uniqueid lookup miss for {unique_id}; fallback to recordingfile in table {self.__config.cdr_table}"
             )
             return await self.__get_fileinfo_by_recordingfile(unique_id)
 
     async def __call__(self, unique_id: str) -> File:
+        await self.__logger.info(
+            f"[records_provider] resolve record unique_id={unique_id} table={self.__config.cdr_table} "
+            f"external_url={self.__config.external_records_service_url}"
+        )
+
         if not is_valid_unique_id(unique_id):
             raise ValueError(f"Invalid unique_id: `{unique_id}`.")
 
@@ -239,7 +244,7 @@ class GetRecordFileByUniqueIdQuery(IGetRecordFileByUniqueIdQuery):
 
         if self.__config.external_records_service_url is not None:
             if filename is None:
-                await self.__logger.debug(f"CDR lookup missed for unique_id={unique_id}; fallback to external /search-file")
+                await self.__logger.info(f"[records_provider] DB lookup miss for {unique_id}; fallback to external /search-file")
                 filename = await self.__search_filename_in_external_service(unique_id=unique_id)
 
             content = await self.__fetch_file_from_external_service(filename=filename)
