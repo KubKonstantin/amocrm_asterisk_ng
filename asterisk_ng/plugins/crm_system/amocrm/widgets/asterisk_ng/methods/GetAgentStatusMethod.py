@@ -69,9 +69,8 @@ class GetAgentStatusMethod(IControllerMethod):
         user_id = CrmUserId(id=amouser_id, email=amouser_email)
         current_agent_status = AgentStatus(**current_status)
 
-        try:
-            call_domain_model: CallDomainModel = await self.__get_agent_status_query(user_id)
-        except KeyError:
+        call_domain_model: Optional[CallDomainModel] = await self.__get_agent_status_query(user_id)
+        if call_domain_model is None:
             if current_agent_status.status == CallStatus.CONVERSATION:
                 return self.__make_not_conversation_status()
         else:
