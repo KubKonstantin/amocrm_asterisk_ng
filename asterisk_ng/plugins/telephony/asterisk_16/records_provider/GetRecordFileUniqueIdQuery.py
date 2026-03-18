@@ -89,6 +89,8 @@ class GetRecordFileByUniqueIdQuery(IGetRecordFileByUniqueIdQuery):
 
         timeout = self.__config.external_records_service_timeout
 
+        await self.__logger.debug(f"Fetching record from external service via /decrypt. filename={filename} client={client_id}")
+
         decrypt_request = Request(
             f"{service_url}/decrypt",
             data=json.dumps({
@@ -130,6 +132,8 @@ class GetRecordFileByUniqueIdQuery(IGetRecordFileByUniqueIdQuery):
             )
 
         timeout = self.__config.external_records_service_timeout
+        await self.__logger.debug(f"Searching record in external service via /search-file. unique_id={unique_id} client={client_id}")
+
         search_request = Request(
             f"{service_url}/search-file",
             data=json.dumps({
@@ -235,6 +239,7 @@ class GetRecordFileByUniqueIdQuery(IGetRecordFileByUniqueIdQuery):
 
         if self.__config.external_records_service_url is not None:
             if filename is None:
+                await self.__logger.debug(f"CDR lookup missed for unique_id={unique_id}; fallback to external /search-file")
                 filename = await self.__search_filename_in_external_service(unique_id=unique_id)
 
             content = await self.__fetch_file_from_external_service(filename=filename)
