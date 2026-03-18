@@ -106,9 +106,11 @@ dynamic:
         origination_context: from-internal
         origination_timeout: 30000
         redirect_context: from-internal
+        agent_endpoint_prefix: vipma
 
       "telephony.asterisk16.reflector":
         internal_number_pattern: "(?:SIP|PJSIP)/(\\d\\d\\d)\\D"
+        agent_endpoint_prefix: vipma
 
       "telephony.records_provider":
         mysql:
@@ -118,6 +120,12 @@ dynamic:
           password: password
           database: asteriskcdrdb
         media_root: "/var/spool/asterisk/monitor/%Y/%m/%d/"
+        # Optional: fetch records via external decrypt/download service instead of local filesystem.
+        # If enabled, connector will call POST {external_records_service_url}/decrypt and then GET download_url.
+        external_records_service_url: "http://127.0.0.1:5000"
+        external_records_service_timeout: 20
+        # Used when filename doesn't match 25_<client>|... format and for /search-file fallback by unique_id.
+        external_records_service_default_client: null
 
       "system.storage":
         host: 127.0.0.1
