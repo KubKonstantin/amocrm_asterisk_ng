@@ -71,6 +71,51 @@ class GetRecordFileByUniqueIdQuery(IGetRecordFileByUniqueIdQuery):
         return match.group(1)
 
 
+
+    # Backward-compatible shim for older call paths.
+    async def __search_filename_in_external_service(self, unique_id: str) -> str:
+        client_id = self.__config.external_records_service_default_client
+        if client_id is None:
+            raise FileNotFoundError(
+                "external_records_service_default_client is required for /search-file fallback"
+            )
+
+        service_url = self.__config.external_records_service_url
+        if service_url is None:
+            raise RuntimeError("external records service url is not configured")
+
+        timeout = self.__config.external_records_service_timeout
+        await self.__logger.info(
+            f"[records_provider] compatibility /search-file by unique_id={unique_id} client={client_id}"
+        )
+
+        search_request = Request(
+            f"{service_url.rstrip('/')}/search-file",
+            data=json.dumps({
+                "X-Client": client_id,
+                "term": unique_id,
+                "type": "contains",
+            }).encode("utf-8"),
+            headers={"Content-Type": "application/json"},
+            method="POST",
+        )
+
+        try:
+            with urlopen(search_request, timeout=timeout) as response:
+                payload = json.loads(response.read().decode("utf-8"))
+        except (HTTPError, URLError) as exc:
+            raise RuntimeError(f"Failed to call search-file endpoint: {exc}")
+
+        files = payload.get("files") or []
+        if len(files) == 0:
+            raise FileNotFoundError(f"File with unique_id: `{unique_id}` not found in external service.")
+
+        filename = files[0].get("original_filename")
+        if filename is None:
+            raise FileNotFoundError(f"File with unique_id: `{unique_id}` not found in external service.")
+
+        return filename
+
     async def __search_record_in_external_service(self, filename: str, client_id: str) -> str:
         service_url = self.__config.external_records_service_url
         if service_url is None:
@@ -211,6 +256,15 @@ class GetRecordFileByUniqueIdQuery(IGetRecordFileByUniqueIdQuery):
                 await self.__logger.info(f"[records_provider] DB lookup miss for {unique_id}; fallback to external /search-file")
                 filename = await self.__search_filename_in_external_service(unique_id=unique_id)
 
+            content = await self.__fetch_file_from_external_service(filename=filename)
+            filetype = self.__get_filetype(filename)
+            return File(
+                name=filename,
+                type=filetype,
+                content=content,
+            )
+
+        if self.__config.external_records_service_url is not None:
             content = await self.__fetch_file_from_external_service(filename=filename)
             filetype = self.__get_filetype(filename)
             return File(
