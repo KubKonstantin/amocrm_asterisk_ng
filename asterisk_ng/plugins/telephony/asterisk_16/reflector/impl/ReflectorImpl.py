@@ -153,7 +153,10 @@ class ReflectorImpl(IReflector):
         return CallCompletedTelephonyEvent.parse_raw(json_event)
 
     async def delete_call_completed_event(self, linked_id: str) -> None:
-        await self.__storage.delete(f"call_completed-{linked_id}")
+        try:
+            await self.__storage.delete(f"call_completed-{linked_id}")
+        except KeyError:
+            pass
 
     async def set_ignore_cdr_flag(self, linked_id: str) -> None:
         await self.__storage.set(f"ignore_cdr-{linked_id}", "true", expire=self.__CDR_DELAY)
