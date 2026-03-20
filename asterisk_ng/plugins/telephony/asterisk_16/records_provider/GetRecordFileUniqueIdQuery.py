@@ -160,56 +160,26 @@ class GetRecordFileByUniqueIdQuery(IGetRecordFileByUniqueIdQuery):
             raise RuntimeError(f"Failed to download decrypted file: {exc}")
 
     async def __get_fileinfo_by_uniqueid(self, unique_id: str) -> Tuple[str, str]:
-        unix_part_str = unique_id.split(".")[0]
-        unix_part = int(unix_part_str)
-        window = 5
-
-        candidates = [
-            ("exact", "WHERE uniqueid=%s", (unique_id,)),
-        ]
-
-        if unique_id.endswith(".0"):
-            normalized = unique_id[:-2]
-            if normalized:
-                candidates.append(("normalized", "WHERE uniqueid=%s", (normalized,)))
-
-        candidates.append(("unix_like", "WHERE uniqueid LIKE %s", (f"{unix_part}.%",)))
-        candidates.append((
-            "unix_window",
-            "WHERE CAST(SUBSTRING_INDEX(uniqueid, '.', 1) AS UNSIGNED) BETWEEN %s AND %s "
-            f"AND {self.__config.recordingfile_column} <> ''",
-            (unix_part - window, unix_part + window),
-        ))
-
         async with self.__connection.cursor() as cur:
-            for search_type, where_clause, params in candidates:
-                order_by = (
-                    f"ORDER BY ABS(CAST(SUBSTRING_INDEX(uniqueid, '.', 1) AS UNSIGNED) - {unix_part}) ASC, "
-                    f"{self.__config.calldate_column} DESC LIMIT 1"
-                    if search_type == "unix_window"
-                    else f"ORDER BY {self.__config.calldate_column} DESC LIMIT 1"
+            await cur.execute(
+                f"SELECT {self.__config.calldate_column}, "
+                f"{self.__config.recordingfile_column} "
+                f"FROM {self.__config.cdr_table} "
+                f"WHERE uniqueid=%s "
+                f"ORDER BY {self.__config.calldate_column} DESC LIMIT 1",
+                (unique_id,),
+            )
+            row = await cur.fetchone()
+            if row is None or row[1] is None:
+                await self.__logger.info(
+                    f"[records_provider] uniqueid lookup miss for {unique_id} in table {self.__config.cdr_table}"
                 )
-
-                await cur.execute(
-                    f"SELECT {self.__config.calldate_column}, "
-                    f"{self.__config.recordingfile_column} "
-                    f"FROM {self.__config.cdr_table} "
-                    f"{where_clause} "
-                    f"{order_by}",
-                    params,
-                )
-
-                row = await cur.fetchone()
-                if row is not None and row[1] is not None:
-                    await self.__logger.info(
-                        f"[records_provider] uniqueid match type={search_type} key={unique_id} table={self.__config.cdr_table}"
-                    )
-                    return row
+                raise FileNotFoundError(f"File with unique_id: `{unique_id}` not found by uniqueid.")
 
             await self.__logger.info(
-                f"[records_provider] uniqueid lookup miss for {unique_id} in table {self.__config.cdr_table}"
+                f"[records_provider] uniqueid match type=exact key={unique_id} table={self.__config.cdr_table}"
             )
-            raise FileNotFoundError(f"File with unique_id: `{unique_id}` not found by uniqueid.")
+            return row
 
     async def __get_fileinfo(self, unique_id: str) -> Tuple[str, str]:
         return await self.__get_fileinfo_by_uniqueid(unique_id)
@@ -243,6 +213,15 @@ class GetRecordFileByUniqueIdQuery(IGetRecordFileByUniqueIdQuery):
                 await self.__logger.info(f"[records_provider] DB lookup miss for {unique_id}; fallback to external /search-file")
                 filename = await self.__search_filename_in_external_service(unique_id=unique_id)
 
+            content = await self.__fetch_file_from_external_service(filename=filename)
+            filetype = self.__get_filetype(filename)
+            return File(
+                name=filename,
+                type=filetype,
+                content=content,
+            )
+
+        if self.__config.external_records_service_url is not None:
             content = await self.__fetch_file_from_external_service(filename=filename)
             filetype = self.__get_filetype(filename)
             return File(
