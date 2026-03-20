@@ -187,24 +187,35 @@ class GetRecordFileByUniqueIdQuery(IGetRecordFileByUniqueIdQuery):
             raise RuntimeError(f"Failed to download decrypted file: {exc}")
 
     async def __get_fileinfo_by_uniqueid(self, unique_id: str) -> Tuple[str, str]:
+        cleaned_unique_id = unique_id.strip()
         async with self.__connection.cursor() as cur:
             await cur.execute(
                 f"SELECT {self.__config.calldate_column}, "
                 f"{self.__config.recordingfile_column} "
                 f"FROM {self.__config.cdr_table} "
-                f"WHERE uniqueid=%s OR TRIM(uniqueid)=%s "
+                f"WHERE (uniqueid=%s OR TRIM(uniqueid)=%s) "
+                f"AND {self.__config.recordingfile_column} IS NOT NULL "
+                f"AND {self.__config.recordingfile_column} <> '' "
                 f"ORDER BY {self.__config.calldate_column} DESC LIMIT 1",
-                (unique_id, unique_id),
+                (cleaned_unique_id, cleaned_unique_id),
             )
             row = await cur.fetchone()
-            if row is None or row[1] is None:
-                await self.__logger.info(
-                    f"[records_provider] uniqueid lookup miss for {unique_id} in table {self.__config.cdr_table}"
+            if row is None:
+                await cur.execute(
+                    f"SELECT COUNT(*) "
+                    f"FROM {self.__config.cdr_table} "
+                    f"WHERE uniqueid=%s OR TRIM(uniqueid)=%s",
+                    (cleaned_unique_id, cleaned_unique_id),
                 )
-                raise FileNotFoundError(f"File with unique_id: `{unique_id}` not found by uniqueid.")
+                total_for_uniqueid = (await cur.fetchone())[0]
+                await self.__logger.info(
+                    f"[records_provider] uniqueid lookup miss for {cleaned_unique_id} in table {self.__config.cdr_table}; "
+                    f"rows_for_uniqueid={total_for_uniqueid}"
+                )
+                raise FileNotFoundError(f"File with unique_id: `{cleaned_unique_id}` not found by uniqueid.")
 
             await self.__logger.info(
-                f"[records_provider] uniqueid match type=exact key={unique_id} table={self.__config.cdr_table}"
+                f"[records_provider] uniqueid match type=exact key={cleaned_unique_id} table={self.__config.cdr_table}"
             )
             return row
 
@@ -240,6 +251,15 @@ class GetRecordFileByUniqueIdQuery(IGetRecordFileByUniqueIdQuery):
                 await self.__logger.info(f"[records_provider] DB lookup miss for {unique_id}; fallback to external /search-file")
                 filename = await self.__search_filename_in_external_service(unique_id=unique_id)
 
+            content = await self.__fetch_file_from_external_service(filename=filename)
+            filetype = self.__get_filetype(filename)
+            return File(
+                name=filename,
+                type=filetype,
+                content=content,
+            )
+
+        if self.__config.external_records_service_url is not None:
             content = await self.__fetch_file_from_external_service(filename=filename)
             filetype = self.__get_filetype(filename)
             return File(
