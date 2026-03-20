@@ -72,50 +72,6 @@ class GetRecordFileByUniqueIdQuery(IGetRecordFileByUniqueIdQuery):
 
 
 
-    # Backward-compatible shim for older call paths.
-    async def __search_filename_in_external_service(self, unique_id: str) -> str:
-        client_id = self.__config.external_records_service_default_client
-        if client_id is None:
-            raise FileNotFoundError(
-                "external_records_service_default_client is required for /search-file fallback"
-            )
-
-        service_url = self.__config.external_records_service_url
-        if service_url is None:
-            raise RuntimeError("external records service url is not configured")
-
-        timeout = self.__config.external_records_service_timeout
-        await self.__logger.info(
-            f"[records_provider] compatibility /search-file by unique_id={unique_id} client={client_id}"
-        )
-
-        search_request = Request(
-            f"{service_url.rstrip('/')}/search-file",
-            data=json.dumps({
-                "X-Client": client_id,
-                "term": unique_id,
-                "type": "contains",
-            }).encode("utf-8"),
-            headers={"Content-Type": "application/json"},
-            method="POST",
-        )
-
-        try:
-            with urlopen(search_request, timeout=timeout) as response:
-                payload = json.loads(response.read().decode("utf-8"))
-        except (HTTPError, URLError) as exc:
-            raise RuntimeError(f"Failed to call search-file endpoint: {exc}")
-
-        files = payload.get("files") or []
-        if len(files) == 0:
-            raise FileNotFoundError(f"File with unique_id: `{unique_id}` not found in external service.")
-
-        filename = files[0].get("original_filename")
-        if filename is None:
-            raise FileNotFoundError(f"File with unique_id: `{unique_id}` not found in external service.")
-
-        return filename
-
     async def __search_record_in_external_service(self, filename: str, client_id: str) -> str:
         service_url = self.__config.external_records_service_url
         if service_url is None:
@@ -204,7 +160,9 @@ class GetRecordFileByUniqueIdQuery(IGetRecordFileByUniqueIdQuery):
             raise RuntimeError(f"Failed to download decrypted file: {exc}")
 
     async def __get_fileinfo_by_uniqueid(self, unique_id: str) -> Tuple[str, str]:
-        unix_part = unique_id.split(".")[0]
+        unix_part_str = unique_id.split(".")[0]
+        unix_part = int(unix_part_str)
+        window = 5
 
         candidates = [
             ("exact", "WHERE uniqueid=%s", (unique_id,)),
@@ -216,22 +174,35 @@ class GetRecordFileByUniqueIdQuery(IGetRecordFileByUniqueIdQuery):
                 candidates.append(("normalized", "WHERE uniqueid=%s", (normalized,)))
 
         candidates.append(("unix_like", "WHERE uniqueid LIKE %s", (f"{unix_part}.%",)))
+        candidates.append((
+            "unix_window",
+            "WHERE CAST(SUBSTRING_INDEX(uniqueid, '.', 1) AS UNSIGNED) BETWEEN %s AND %s "
+            f"AND {self.__config.recordingfile_column} <> ''",
+            (unix_part - window, unix_part + window),
+        ))
 
         async with self.__connection.cursor() as cur:
             for search_type, where_clause, params in candidates:
+                order_by = (
+                    f"ORDER BY ABS(CAST(SUBSTRING_INDEX(uniqueid, '.', 1) AS UNSIGNED) - {unix_part}) ASC, "
+                    f"{self.__config.calldate_column} DESC LIMIT 1"
+                    if search_type == "unix_window"
+                    else f"ORDER BY {self.__config.calldate_column} DESC LIMIT 1"
+                )
+
                 await cur.execute(
                     f"SELECT {self.__config.calldate_column}, "
                     f"{self.__config.recordingfile_column} "
                     f"FROM {self.__config.cdr_table} "
                     f"{where_clause} "
-                    f"ORDER BY {self.__config.calldate_column} DESC LIMIT 1",
+                    f"{order_by}",
                     params,
                 )
 
                 row = await cur.fetchone()
                 if row is not None and row[1] is not None:
                     await self.__logger.info(
-                        f"[records_provider] uniqueid match type={search_type} key={params[0]} table={self.__config.cdr_table}"
+                        f"[records_provider] uniqueid match type={search_type} key={unique_id} table={self.__config.cdr_table}"
                     )
                     return row
 
@@ -239,9 +210,6 @@ class GetRecordFileByUniqueIdQuery(IGetRecordFileByUniqueIdQuery):
                 f"[records_provider] uniqueid lookup miss for {unique_id} in table {self.__config.cdr_table}"
             )
             raise FileNotFoundError(f"File with unique_id: `{unique_id}` not found by uniqueid.")
-
-    async def __get_fileinfo(self, unique_id: str) -> Tuple[str, str]:
-        return await self.__get_fileinfo_by_uniqueid(unique_id)
 
     async def __get_fileinfo(self, unique_id: str) -> Tuple[str, str]:
         return await self.__get_fileinfo_by_uniqueid(unique_id)
@@ -275,6 +243,15 @@ class GetRecordFileByUniqueIdQuery(IGetRecordFileByUniqueIdQuery):
                 await self.__logger.info(f"[records_provider] DB lookup miss for {unique_id}; fallback to external /search-file")
                 filename = await self.__search_filename_in_external_service(unique_id=unique_id)
 
+            content = await self.__fetch_file_from_external_service(filename=filename)
+            filetype = self.__get_filetype(filename)
+            return File(
+                name=filename,
+                type=filetype,
+                content=content,
+            )
+
+        if self.__config.external_records_service_url is not None:
             content = await self.__fetch_file_from_external_service(filename=filename)
             filetype = self.__get_filetype(filename)
             return File(
