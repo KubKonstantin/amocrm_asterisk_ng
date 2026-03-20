@@ -8,3 +8,4 @@ class Asterisk16FunctionPluginConfig(BaseModel):
     origination_context: str = "from-internal"
     origination_timeout: int = 30_000
     redirect_context: str = "from-internal"
+    agent_endpoint_prefix: str = "vipma_"
