@@ -96,7 +96,8 @@ class ReflectorPlugin(AbstractPlugin):
                 is_physical_channel=self.__is_physical_channel,
                 reflector=reflector,
                 event_bus=event_bus,
-                logger=logger
+                logger=logger,
+                agent_endpoint_prefix=config.agent_endpoint_prefix,
             )
         )
         ami_manager.attach_event_handler(
@@ -104,7 +105,8 @@ class ReflectorPlugin(AbstractPlugin):
             NewCallerIdEventHandler(
                 is_physical_channel=self.__is_physical_channel,
                 reflector=reflector,
-                logger=logger
+                logger=logger,
+                agent_endpoint_prefix=config.agent_endpoint_prefix,
             )
         )
         ami_manager.attach_event_handler(
@@ -113,7 +115,8 @@ class ReflectorPlugin(AbstractPlugin):
                 is_physical_channel=self.__is_physical_channel,
                 reflector=reflector,
                 event_bus=event_bus,
-                logger=logger
+                logger=logger,
+                agent_endpoint_prefix=config.agent_endpoint_prefix,
             )
         )
         ami_manager.attach_event_handler(
@@ -121,7 +124,8 @@ class ReflectorPlugin(AbstractPlugin):
             CdrEventHandler(
                 reflector=reflector,
                 event_bus=event_bus,
-                logger=logger
+                logger=logger,
+                agent_endpoint_prefix=config.agent_endpoint_prefix,
             )
         )
 
