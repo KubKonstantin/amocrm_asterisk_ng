@@ -91,6 +91,7 @@ class Asterisk16FunctionPlugin(AbstractPlugin):
                 reflector=reflector,
                 event_bus=event_bus,
                 context=config.redirect_context,
+                agent_endpoint_prefix=config.agent_endpoint_prefix,
             )
         )
 
