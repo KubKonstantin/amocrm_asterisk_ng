@@ -6,7 +6,6 @@ from asterisk_ng.interfaces import CrmUserId
 from asterisk_ng.interfaces import IRedirectDomainCommand
 
 from ..controller import IControllerMethod
-from ..controller import InvalidParamsException
 
 
 __all__ = ["RedirectMethod"]
@@ -31,8 +30,8 @@ class RedirectMethod(IControllerMethod):
         phone: Optional[str] = None,
     ) -> Optional[Mapping[str, Any]]:
 
-        if phone is None:
-            raise InvalidParamsException()
+        if phone is None or not phone.strip():
+            return None
 
         await self.__redirect_domain_command(
             user_id=CrmUserId(id=amouser_id, email=amouser_email),
