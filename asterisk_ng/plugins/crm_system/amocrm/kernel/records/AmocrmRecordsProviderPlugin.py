@@ -80,5 +80,13 @@ class AmocrmRecordsProviderPlugin(AbstractPlugin):
             tags=["Records"]
         )
 
+        # Совместимость с конфигурациями/прокси, где endpoint публикуется под /record-buffer
+        app.add_api_route(
+            path="/record-buffer/records/{unique_id}",
+            endpoint=call_records_view.handle,
+            methods=["GET"],
+            tags=["Records"]
+        )
+
     async def unload(self) -> None:
         self.__dispatcher.delete_function(IGenerateLinkFunction)
