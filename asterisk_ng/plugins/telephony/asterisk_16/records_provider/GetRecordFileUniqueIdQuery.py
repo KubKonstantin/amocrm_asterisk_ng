@@ -153,6 +153,20 @@ class GetRecordFileByUniqueIdQuery(IGetRecordFileByUniqueIdQuery):
                 f"Unable to resolve X-Client for filename `{filename}`. "
                 "Set external_records_service_default_client in config."
             )
+            row = await cur.fetchone()
+            if row is None:
+                await cur.execute(
+                    f"SELECT COUNT(*) "
+                    f"FROM {self.__config.cdr_table} "
+                    f"WHERE uniqueid=%s OR TRIM(uniqueid)=%s",
+                    (cleaned_unique_id, cleaned_unique_id),
+                )
+                total_for_uniqueid = (await cur.fetchone())[0]
+                await self.__logger.info(
+                    f"[records_provider] uniqueid lookup miss for {cleaned_unique_id} in table {self.__config.cdr_table}; "
+                    f"rows_for_uniqueid={total_for_uniqueid}"
+                )
+                raise FileNotFoundError(f"File with unique_id: `{cleaned_unique_id}` not found by uniqueid.")
 
         timeout = self.__config.external_records_service_timeout
         resolved_filename = await self.__search_record_in_external_service(filename=filename, client_id=client_id)
@@ -252,11 +266,93 @@ class GetRecordFileByUniqueIdQuery(IGetRecordFileByUniqueIdQuery):
         if self.__connection is None:
             self.__connection = await self.__get_connection()
 
+        filename = None
+        date = None
+
         try:
             date, filename = await self.__get_fileinfo(unique_id=unique_id)
         except (RuntimeError, MySQLError):
             self.__connection = await self.__get_connection()
             date, filename = await self.__get_fileinfo(unique_id=unique_id)
+        except FileNotFoundError:
+            if self.__config.external_records_service_url is None:
+                raise
+
+        if self.__config.external_records_service_url is not None:
+            if filename is None:
+                await self.__logger.info(f"[records_provider] DB lookup miss for {unique_id}; fallback to external /search-file")
+                filename = await self.__search_filename_in_external_service(unique_id=unique_id)
+
+            content = await self.__fetch_file_from_external_service(filename=filename)
+            filetype = self.__get_filetype(filename)
+            return File(
+                name=filename,
+                type=filetype,
+                content=content,
+            )
+
+        if self.__config.external_records_service_url is not None:
+            content = await self.__fetch_file_from_external_service(filename=filename)
+            filetype = self.__get_filetype(filename)
+            return File(
+                name=filename,
+                type=filetype,
+                content=content,
+            )
+
+        if self.__config.external_records_service_url is not None:
+            content = await self.__fetch_file_from_external_service(filename=filename)
+            filetype = self.__get_filetype(filename)
+            return File(
+                name=filename,
+                type=filetype,
+                content=content,
+            )
+
+        if self.__config.external_records_service_url is not None:
+            content = await self.__fetch_file_from_external_service(filename=filename)
+            filetype = self.__get_filetype(filename)
+            return File(
+                name=filename,
+                type=filetype,
+                content=content,
+            )
+
+        if self.__config.external_records_service_url is not None:
+            content = await self.__fetch_file_from_external_service(filename=filename)
+            filetype = self.__get_filetype(filename)
+            return File(
+                name=filename,
+                type=filetype,
+                content=content,
+            )
+
+        if self.__config.external_records_service_url is not None:
+            content = await self.__fetch_file_from_external_service(filename=filename)
+            filetype = self.__get_filetype(filename)
+            return File(
+                name=filename,
+                type=filetype,
+                content=content,
+            )
+
+        if self.__config.external_records_service_url is not None:
+            content = await self.__fetch_file_from_external_service(filename=filename)
+            filetype = self.__get_filetype(filename)
+            return File(
+                name=filename,
+                type=filetype,
+                content=content,
+            )
+
+        if self.__config.external_records_service_url is not None:
+            content = await self.__fetch_file_from_external_service(filename=filename)
+            filetype = self.__get_filetype(filename)
+            return File(
+                name=filename,
+                type=filetype,
+                content=content,
+            )
 
         if self.__config.external_records_service_url is not None:
             content = await self.__fetch_file_from_external_service(filename=filename)
