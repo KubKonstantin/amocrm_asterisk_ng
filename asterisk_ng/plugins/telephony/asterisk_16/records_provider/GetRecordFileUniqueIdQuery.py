@@ -204,25 +204,44 @@ class GetRecordFileByUniqueIdQuery(IGetRecordFileByUniqueIdQuery):
             raise RuntimeError(f"Failed to download decrypted file: {exc}")
 
     async def __get_fileinfo_by_uniqueid(self, unique_id: str) -> Tuple[str, str]:
-        async with self.__connection.cursor() as cur:
-            await cur.execute(
-                f"SELECT {self.__config.calldate_column}, "
-                f"{self.__config.recordingfile_column} "
-                f"FROM {self.__config.cdr_table} "
-                f"WHERE uniqueid=%s "
-                f"ORDER BY {self.__config.calldate_column} DESC LIMIT 1",
-                (unique_id,),
-            )
+        unix_part = unique_id.split(".")[0]
 
-            try:
-                date, filename = await cur.fetchone()
-                if filename is None:
-                    raise TypeError
-                return date, filename
-            except TypeError:
-                raise FileNotFoundError(f"File with unique_id: `{unique_id}` not found by uniqueid.")
-            finally:
-                await cur.close()
+        candidates = [
+            ("exact", "WHERE uniqueid=%s", (unique_id,)),
+        ]
+
+        if unique_id.endswith(".0"):
+            normalized = unique_id[:-2]
+            if normalized:
+                candidates.append(("normalized", "WHERE uniqueid=%s", (normalized,)))
+
+        candidates.append(("unix_like", "WHERE uniqueid LIKE %s", (f"{unix_part}.%",)))
+
+        async with self.__connection.cursor() as cur:
+            for search_type, where_clause, params in candidates:
+                await cur.execute(
+                    f"SELECT {self.__config.calldate_column}, "
+                    f"{self.__config.recordingfile_column} "
+                    f"FROM {self.__config.cdr_table} "
+                    f"{where_clause} "
+                    f"ORDER BY {self.__config.calldate_column} DESC LIMIT 1",
+                    params,
+                )
+
+                row = await cur.fetchone()
+                if row is not None and row[1] is not None:
+                    await self.__logger.info(
+                        f"[records_provider] uniqueid match type={search_type} key={params[0]} table={self.__config.cdr_table}"
+                    )
+                    return row
+
+            await self.__logger.info(
+                f"[records_provider] uniqueid lookup miss for {unique_id} in table {self.__config.cdr_table}"
+            )
+            raise FileNotFoundError(f"File with unique_id: `{unique_id}` not found by uniqueid.")
+
+    async def __get_fileinfo(self, unique_id: str) -> Tuple[str, str]:
+        return await self.__get_fileinfo_by_uniqueid(unique_id)
 
     async def __get_fileinfo(self, unique_id: str) -> Tuple[str, str]:
         return await self.__get_fileinfo_by_uniqueid(unique_id)
@@ -256,6 +275,15 @@ class GetRecordFileByUniqueIdQuery(IGetRecordFileByUniqueIdQuery):
                 await self.__logger.info(f"[records_provider] DB lookup miss for {unique_id}; fallback to external /search-file")
                 filename = await self.__search_filename_in_external_service(unique_id=unique_id)
 
+            content = await self.__fetch_file_from_external_service(filename=filename)
+            filetype = self.__get_filetype(filename)
+            return File(
+                name=filename,
+                type=filetype,
+                content=content,
+            )
+
+        if self.__config.external_records_service_url is not None:
             content = await self.__fetch_file_from_external_service(filename=filename)
             filetype = self.__get_filetype(filename)
             return File(
