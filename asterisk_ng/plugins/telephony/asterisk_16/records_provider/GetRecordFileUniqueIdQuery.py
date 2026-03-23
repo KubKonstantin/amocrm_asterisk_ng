@@ -227,14 +227,18 @@ class GetRecordFileByUniqueIdQuery(IGetRecordFileByUniqueIdQuery):
             raise FileNotFoundError(
                 f"File with unique_id: `{cleaned_unique_id}` found but recordingfile is empty."
             )
-            if len(rows) == 0:
-                await self.__logger.info(
-                    f"[records_provider] uniqueid lookup miss for {cleaned_unique_id} in table {self.__config.cdr_table}"
-                )
-                raise FileNotFoundError(f"File with unique_id: `{cleaned_unique_id}` not found by uniqueid.")
 
     async def __get_fileinfo(self, unique_id: str) -> Tuple[str, str]:
         return await self.__get_fileinfo_by_uniqueid(unique_id)
+
+    async def __refresh_read_transaction(self) -> None:
+        """
+        Reuse-safe read strategy for long-lived aiomysql connection:
+        close previous transaction snapshot before new SELECT.
+        """
+        if self.__connection is None:
+            return
+        await self.__connection.rollback()
 
     async def __call__(self, unique_id: str) -> File:
         await self.__logger.info(
@@ -252,9 +256,11 @@ class GetRecordFileByUniqueIdQuery(IGetRecordFileByUniqueIdQuery):
         date = None
 
         try:
+            await self.__refresh_read_transaction()
             date, filename = await self.__get_fileinfo(unique_id=unique_id)
         except (RuntimeError, MySQLError):
             self.__connection = await self.__get_connection()
+            await self.__refresh_read_transaction()
             date, filename = await self.__get_fileinfo(unique_id=unique_id)
         except FileNotFoundError:
             if self.__config.external_records_service_url is None:
@@ -399,15 +405,18 @@ class GetRecordFileByUniqueIdQuery(IGetRecordFileByUniqueIdQuery):
                 content=content,
             )
 
-        directory_path = date.strftime(self.__config.media_root).rstrip('/')
-        file_path = os.path.join(directory_path, filename)
+        if self.__config.external_records_service_url is not None:
+            content = await self.__fetch_file_from_external_service(filename=filename)
+        else:
+            directory_path = date.strftime(self.__config.media_root).rstrip('/')
+            file_path = os.path.join(directory_path, filename)
 
-        if not os.path.exists(file_path):
-            raise FileNotFoundError(
-                f"File with unique_id: `{unique_id}` not found,  file_path: `{file_path}`."
-            )
+            if not os.path.exists(file_path):
+                raise FileNotFoundError(
+                    f"File with unique_id: `{unique_id}` not found,  file_path: `{file_path}`."
+                )
 
-        content = await self.__get_content_from_file(file_path)
+            content = await self.__get_content_from_file(file_path)
 
         filetype = self.__get_filetype(filename)
 
