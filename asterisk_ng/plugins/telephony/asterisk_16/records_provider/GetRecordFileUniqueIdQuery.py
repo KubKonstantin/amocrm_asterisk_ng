@@ -195,7 +195,7 @@ class GetRecordFileByUniqueIdQuery(IGetRecordFileByUniqueIdQuery):
                 f"FROM {self.__config.cdr_table} "
                 f"WHERE uniqueid=%s "
                 f"AND {self.__config.recordingfile_column} IS NOT NULL "
-                f"AND {self.__config.recordingfile_column} <> '' "
+                f"AND TRIM({self.__config.recordingfile_column}) <> '' "
                 f"ORDER BY {self.__config.calldate_column} DESC LIMIT 1",
                 (cleaned_unique_id,),
             )
@@ -243,6 +243,15 @@ class GetRecordFileByUniqueIdQuery(IGetRecordFileByUniqueIdQuery):
                 await self.__logger.info(f"[records_provider] DB lookup miss for {unique_id}; fallback to external /search-file")
                 filename = await self.__search_filename_in_external_service(unique_id=unique_id)
 
+            content = await self.__fetch_file_from_external_service(filename=filename)
+            filetype = self.__get_filetype(filename)
+            return File(
+                name=filename,
+                type=filetype,
+                content=content,
+            )
+
+        if self.__config.external_records_service_url is not None:
             content = await self.__fetch_file_from_external_service(filename=filename)
             filetype = self.__get_filetype(filename)
             return File(

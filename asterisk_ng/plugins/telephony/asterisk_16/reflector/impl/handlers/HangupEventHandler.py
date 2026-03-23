@@ -109,6 +109,42 @@ class HangupEventHandler(IAmiEventHandler):
                 f"Skip hangup completion (transfer). linkedid={linked_id}"
             )
 
+            if linked_root_channel is not None and linked_root_channel.phone is not None:
+                client_phone = linked_root_channel.phone
+            if client_phone is None:
+                client_phone = root_channel.phone
+
+            caller_phone_number = agent_endpoint
+            called_phone_number = client_phone
+
+            is_inbound = (
+                linked_root_channel is not None
+                and "sbc" in linked_root_channel.name.lower()
+                and root_channel.name != linked_root_channel.name
+            )
+
+            if is_inbound:
+                caller_phone_number = client_phone
+                called_phone_number = agent_endpoint
+
+            transfer_completed_event = CallCompletedTelephonyEvent(
+                unique_id=linked_id,
+                disposition=disposition,
+                caller_phone_number=caller_phone_number,
+                called_phone_number=called_phone_number,
+                created_at=datetime.now(),
+            )
+
+            transfer_keys = set(call.channels_unique_ids)
+            transfer_keys.add(linked_id)
+            transfer_keys.add(root_channel.unique_id)
+
+            for transfer_key in transfer_keys:
+                await self.__reflector.save_call_completed_event(
+                    f"{transfer_key}-agent-{agent_endpoint}",
+                    transfer_completed_event,
+                )
+
             await self.__reflector.delete_channel_from_call(
                 linked_id,
                 root_channel.unique_id
