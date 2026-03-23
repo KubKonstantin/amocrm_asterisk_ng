@@ -194,39 +194,31 @@ class GetRecordFileByUniqueIdQuery(IGetRecordFileByUniqueIdQuery):
                 f"{self.__config.recordingfile_column} "
                 f"FROM {self.__config.cdr_table} "
                 f"WHERE uniqueid=%s "
-                f"ORDER BY {self.__config.calldate_column} DESC LIMIT 1",
+                f"ORDER BY {self.__config.calldate_column} DESC LIMIT 20",
                 (cleaned_unique_id,),
             )
-            row = await cur.fetchone()
-            if row is None:
+            rows = await cur.fetchall()
+            if len(rows) == 0:
                 await self.__logger.info(
                     f"[records_provider] uniqueid lookup miss for {cleaned_unique_id} in table {self.__config.cdr_table}"
                 )
                 raise FileNotFoundError(f"File with unique_id: `{cleaned_unique_id}` not found by uniqueid.")
 
-            if row[1] is None or str(row[1]).strip() == "":
-                await cur.execute(
-                    f"SELECT {self.__config.calldate_column}, "
-                    f"{self.__config.recordingfile_column} "
-                    f"FROM {self.__config.cdr_table} "
-                    f"WHERE uniqueid=%s "
-                    f"AND {self.__config.recordingfile_column} IS NOT NULL "
-                    f"AND TRIM({self.__config.recordingfile_column}) <> '' "
-                    f"ORDER BY {self.__config.calldate_column} DESC LIMIT 1",
-                    (cleaned_unique_id,),
-                )
-                row_with_record = await cur.fetchone()
-                if row_with_record is not None:
-                    row = row_with_record
-                else:
-                    raise FileNotFoundError(
-                        f"File with unique_id: `{cleaned_unique_id}` found but recordingfile is empty."
+            for row in rows:
+                recordingfile = row[1]
+                if recordingfile is not None and str(recordingfile).strip() != "":
+                    await self.__logger.info(
+                        f"[records_provider] uniqueid match type=exact key={cleaned_unique_id} table={self.__config.cdr_table}"
                     )
+                    return row
 
             await self.__logger.info(
-                f"[records_provider] uniqueid match type=exact key={cleaned_unique_id} table={self.__config.cdr_table}"
+                f"[records_provider] uniqueid found for {cleaned_unique_id}, but all recordingfile values are empty "
+                f"in table {self.__config.cdr_table}"
             )
-            return row
+            raise FileNotFoundError(
+                f"File with unique_id: `{cleaned_unique_id}` found but recordingfile is empty."
+            )
 
     async def __get_fileinfo(self, unique_id: str) -> Tuple[str, str]:
         return await self.__get_fileinfo_by_uniqueid(unique_id)
@@ -260,6 +252,15 @@ class GetRecordFileByUniqueIdQuery(IGetRecordFileByUniqueIdQuery):
                 await self.__logger.info(f"[records_provider] DB lookup miss for {unique_id}; fallback to external /search-file")
                 filename = await self.__search_filename_in_external_service(unique_id=unique_id)
 
+            content = await self.__fetch_file_from_external_service(filename=filename)
+            filetype = self.__get_filetype(filename)
+            return File(
+                name=filename,
+                type=filetype,
+                content=content,
+            )
+
+        if self.__config.external_records_service_url is not None:
             content = await self.__fetch_file_from_external_service(filename=filename)
             filetype = self.__get_filetype(filename)
             return File(
