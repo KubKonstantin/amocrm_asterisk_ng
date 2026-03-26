@@ -1,0 +1,41 @@
+report:
+  junit_xml: ./artifacts/voip-autotest.junit.xml
+
+session:
+  # Все проверки (WebRTC/SIP/RTP) выполняются в рамках одного call_id.
+  # Можно не задавать: тогда call_id будет сгенерирован автоматически.
+  call_id: voip-autotest-demo@example.local
+
+webrtc:
+  enabled: true
+  mode: websocket # websocket | http
+  url: ws://127.0.0.1:8080/ws
+  offer: '{"type":"offer","call_id":"{{call_id}}","sdp":"fake"}'
+  expected_answer_contains: '{{call_id}}'
+  # Дополнительно: regexp-проверка ответа на наличие call_id
+  response_call_id_pattern: "call_id"
+  # Если сервер возвращает JSON с rtp_remote_host/rtp_remote_port, можно включить:
+  response_json: false
+  timeout_sec: 5
+
+sip:
+  enabled: true
+  host: 127.0.0.1
+  port: 5060
+  domain: 127.0.0.1
+  from_user: autotest
+  to_user: autotest
+  expected_status_codes: [200, 401, 403]
+  timeout_sec: 5
+
+rtp:
+  enabled: true
+  local_host: 0.0.0.0
+  local_port: 40100
+  # Можно не задавать, если WebRTC ответ содержит rtp_remote_host/rtp_remote_port и включен response_json
+  remote_host: 127.0.0.1
+  remote_port: 40102
+  duration_sec: 5
+  frame_ms: 20
+  payload_type: 0
+  min_received_packets: 1
